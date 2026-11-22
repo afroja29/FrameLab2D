@@ -4,7 +4,20 @@
 
 By Afroja Sultana
 
-## Start the app
+> **Browser version:** [Open FrameLab 2D](https://afroja29.github.io/FrameLab2D/) · [Read the web guide](https://afroja29.github.io/FrameLab2D/readme.html)
+>
+> No MATLAB, installation or account is needed for the browser edition. Choose **Load demo** and start exploring. All structural calculations run locally in your browser. The web release covers all seven analysis areas with the scope and limitations documented in [README_WEB.md](README_WEB.md).
+
+## Try it in one minute
+
+1. Open the live browser app and choose **Load demo**.
+2. Open **Damage diagnosis**, choose **Simulate data**, then **Run diagnosis**.
+3. Open **Sensor placement** and choose **Optimize placement**.
+4. For the RC example, choose **Deterioration**, then **RC 400 mm preset**, **Assign to group**, and **Apply and compare**.
+
+Use `FrameLab2D_Web_QR.png` for direct audience access. `FrameLab2D_QR.png` links to the source repository. The MATLAB files and original MATLAB ZIP remain available below.
+
+## Start the MATLAB app
 
 1. Extract the ZIP. You can keep the extracted `FrameLab2D` folder in OneDrive.
 2. Open MATLAB and select that folder as the Current Folder.
@@ -65,8 +78,3 @@ Static diagnosis and dynamics remain linear elastic. Newton-Raphson is used for 
 - `HandCalculation_Reference.csv`: section and cantilever hand-check reference.
 - `OpenSees_NR_Comparison.json` and `Adaptive_NR_Check.txt`: recorded independent numerical comparisons.
 
-## Audience access
-
-Public link: https://github.com/afroja29/FrameLab2D
-
-Choose **Code > Download ZIP**, extract it, open the extracted folder in MATLAB and run `FrameLab2D`. You can also download `FrameLab2D_Full_Package.zip`, which contains the complete organized package. MATLAB must already be available for the short setup. This repository does not run the app inside GitHub or on a phone. See `AUDIENCE_DEMO.md` for a one-minute example. Scan `FrameLab2D_QR.png` to open this repository.

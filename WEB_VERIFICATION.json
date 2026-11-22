@@ -1,0 +1,27 @@
+{
+  "passed": true,
+  "cantilever_mm": 0.5625,
+  "EA_ratio": 0.8967417743959388,
+  "EI_ratio": 0.8945946770021906,
+  "diagnosed_member": 1,
+  "tangent_relative_error": 5.189797599608154e-13,
+  "NR_residual": 1.1934538910164826e-16,
+  "critical_load_N": 4386499.882023989,
+  "critical_exact_N": 4386490.844928604,
+  "dynamic_f1_Hz": 0.7885464361473407,
+  "independent_frame_reference": {
+    "independent_numpy_relative_displacement_error": 1.7400115668565097e-14,
+    "default_roof_mm": 33.20564549289966
+  },
+  "browser_workflows_checked": [
+    "startup and static response",
+    "add sensor",
+    "adequacy rank",
+    "simulate and diagnose",
+    "greedy recommendations",
+    "Newmark dynamics",
+    "Newton-Raphson convergence",
+    "RC preset and deterioration comparison"
+  ],
+  "physical_phone_test": false
+}
