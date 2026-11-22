@@ -4,9 +4,9 @@
 
 By Afroja Sultana
 
-> **Browser version:** [Open FrameLab 2D](https://afroja29.github.io/FrameLab2D/) · [Read the web guide](https://afroja29.github.io/FrameLab2D/readme.html)
+> **Browser version:** [Open FrameLab 2D](https://afroja29.github.io/FrameLab2D/web/) · [Read the web guide](https://afroja29.github.io/FrameLab2D/web/readme.html)
 >
-> No MATLAB, installation or account is needed for the browser edition. Choose **Load demo** and start exploring. All structural calculations run locally in your browser. The web release covers all seven analysis areas with the scope and limitations documented in [README_WEB.md](README_WEB.md).
+> No MATLAB, installation or account is needed for the browser edition. Choose **Load demo** and start exploring. All structural calculations run locally in your browser. The web release covers all seven analysis areas with the scope and limitations documented in [README_WEB.md](web/README_WEB.md).
 
 ## Try it in one minute
 
@@ -15,7 +15,7 @@ By Afroja Sultana
 3. Open **Sensor placement** and choose **Optimize placement**.
 4. For the RC example, choose **Deterioration**, then **RC 400 mm preset**, **Assign to group**, and **Apply and compare**.
 
-Use `FrameLab2D_Web_QR.png` for direct audience access. `FrameLab2D_QR.png` links to the source repository. The MATLAB files and original MATLAB ZIP remain available below.
+Use `web/FrameLab2D_Web_QR.png` for direct audience access. `FrameLab2D_QR.png` links to the source repository. The MATLAB files and original MATLAB ZIP remain available below.
 
 ## Start the MATLAB app
 
