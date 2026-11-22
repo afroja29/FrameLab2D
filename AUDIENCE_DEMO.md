@@ -1,12 +1,14 @@
-# Audience demo
+# FrameLab 2D audience demo
 
-Open https://afroja29.github.io/FrameLab2D/ in your browser. No account or installation required.
+Open https://afroja29.github.io/FrameLab2D/web/ in a modern browser. No MATLAB, installation or account is required.
 
-1. Choose **Load demo**. Roof displacement is approximately 33.2056 mm for the default frame.
-2. Choose **Damage diagnosis**, keep E1 and 30% loss, click **Simulate data**, then **Run diagnosis**.
-3. Open **Sensor placement**, click **Optimize placement**. The stars are suggested new X channels.
-4. Open **Deterioration**. Choose **RC 400 mm preset**, **Assign to group**, then **Apply and compare** to see the healthy/deteriorated RC comparison.
+1. Choose **Load demo**. The default roof displacement is approximately 33.2056 mm.
+2. Open **Damage diagnosis**, choose **Simulate data**, then **Run diagnosis**.
+3. Open **Sensor placement**, choose **Optimize placement** to see proposed sensor locations.
+4. Open **Deterioration**, choose **RC 400 mm preset**, **Assign to group**, then **Apply and compare** for healthy/deteriorated RC results.
 
-README and methods: https://afroja29.github.io/FrameLab2D/readme.html
+GUI and methods guide: https://afroja29.github.io/FrameLab2D/web/readme.html
 
-Phone and other-computer checks, and a backup screen recording, must still be completed before the presentation.
+Use FrameLab2D_Web_QR.png for the working analysis GUI. The root homepage is a separate interface prototype.
+
+Test on a phone and another computer at least 24 hours before presenting. Keep an offline web folder and a short screen recording as backups.
