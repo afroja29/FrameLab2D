@@ -1,0 +1,55 @@
+{
+  "opensees_version": "3.8.0",
+  "model": "2D elasticBeamColumn with Corotational transform, Newton, dead nodal loads",
+  "comparisons": [
+    {
+      "stories": 1,
+      "gravity_per_floor_N": 0,
+      "relative_displacement_error": 1.3913529109159313e-13,
+      "our_roof_mm": 2.3298696552305507,
+      "opensees_roof_mm": 2.329869655230281
+    },
+    {
+      "stories": 1,
+      "gravity_per_floor_N": 500000.0,
+      "relative_displacement_error": 1.3251047151483956e-13,
+      "our_roof_mm": 2.345237858532571,
+      "opensees_roof_mm": 2.345237858532585
+    },
+    {
+      "stories": 2,
+      "gravity_per_floor_N": 0,
+      "relative_displacement_error": 5.333061780707821e-14,
+      "our_roof_mm": 7.688234811586341,
+      "opensees_roof_mm": 7.688234811586185
+    },
+    {
+      "stories": 2,
+      "gravity_per_floor_N": 500000.0,
+      "relative_displacement_error": 5.543792851484379e-10,
+      "our_roof_mm": 7.804647692688042,
+      "opensees_roof_mm": 7.804647697136998
+    },
+    {
+      "stories": 3,
+      "gravity_per_floor_N": 0,
+      "relative_displacement_error": 5.930868695850563e-14,
+      "our_roof_mm": 13.846814684291296,
+      "opensees_roof_mm": 13.846814684291784
+    },
+    {
+      "stories": 3,
+      "gravity_per_floor_N": 500000.0,
+      "relative_displacement_error": 1.8169825954694138e-09,
+      "our_roof_mm": 14.1927767163199,
+      "opensees_roof_mm": 14.192776742265531
+    },
+    {
+      "case": "16-element beam-column",
+      "relative_displacement_error": 5.984786241204152e-14,
+      "our_tip_mm": 1.5162970608708337,
+      "opensees_tip_mm": 1.5162970608708328
+    }
+  ],
+  "matlab_runtime_executed": false
+}
