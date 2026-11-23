@@ -8,11 +8,13 @@ By Afroja Sultana
 >
 > No MATLAB, installation or account is needed for the browser edition. Choose **Load demo** and start exploring. All structural calculations run locally in your browser. The web release covers all seven analysis areas with the scope and limitations documented in [README_WEB.md](web/README_WEB.md).
 
-## Independent live OpenSees analysis
+## Connected seven-tab Streamlit app with OpenSees
 
 [Open the live OpenSees app](https://framelab2d-opensees.streamlit.app/) · [Run guide](README_OPENSEES.md) · [Audience QR code](FrameLab2D_OpenSees_QR.png)
 
-No installation is needed for this hosted app. On a phone, open the sidebar, review the preset and click **RUN LIVE OPENSEES ANALYSIS**. It builds and solves an independent OpenSees model on the server for each Run. It covers static, modal, harmonic dynamic and corotational P-Delta analysis. Sensor diagnosis and placement remain in FrameLab; they are not reproduced in this OpenSees companion.
+No installation is needed for this hosted app. On a phone, open the sidebar, review the preset and click **RUN LIVE OPENSEES ANALYSIS**. It builds and solves an independent OpenSees model on the server for each Run. All seven modules are connected: frame analysis, sensor network, damage diagnosis, dynamics, greedy sensor placement, P-Delta/reference buckling and exposure comparison with re-optimization. Structural trial responses use OpenSees; diagnosis, placement and reference buckling are FrameLab algorithms around those responses. The initial active state is Healthy RC. Apply a member-loss table in tab 7 to activate deteriorated RC.
+
+Download the complete Streamlit source and launcher: [FrameLab2D_Streamlit_Full.zip](FrameLab2D_Streamlit_Full.zip). The existing OpenSees QR still opens this updated app.
 
 ## Try it in one minute
 

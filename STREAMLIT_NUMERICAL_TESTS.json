@@ -1,0 +1,40 @@
+{
+  "seven_modules": true,
+  "version": "3.8.0",
+  "healthy_roof_mm": 8.646462935648273,
+  "deteriorated_roof_mm": 9.607217787713306,
+  "dynamic_peak_mm": 28.49786372371806,
+  "pdelta_mm": 10.683670746908449,
+  "critical_healthy": 50.83168374515561,
+  "noiseless_diagnosis": {
+    "Element": 1,
+    "Alpha": 0.3,
+    "Objective": 0.0,
+    "RMSE_raw": 0.0
+  },
+  "sensor_rank": 2,
+  "diagnosis_placement_nodes": [
+    7,
+    4
+  ],
+  "controlled_placement": {
+    "dofs": [
+      18,
+      9
+    ],
+    "nodes": [
+      7,
+      4
+    ],
+    "scores": [
+      0.0558258569271603,
+      0.0558712920947142
+    ],
+    "final_score": 0.0558712920947142
+  },
+  "Euler_reference_relative_error": 3.276608560098815e-05,
+  "zero_loss_identity": true,
+  "unaffected_members_identity": true,
+  "noncompounding_application": true,
+  "seconds": 0.5208104030007235
+}

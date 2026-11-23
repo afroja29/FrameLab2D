@@ -1,0 +1,20 @@
+{
+  "all_seven_tabs": true,
+  "real_analysis": true,
+  "sensitivity_rank": true,
+  "noise_measurement_audit": true,
+  "diagnosis_full_scan": true,
+  "greedy_layout": true,
+  "exposure_applies_and_solves": true,
+  "exposure_invalidates_inference": true,
+  "reoptimization_is_fresh_comparison": true,
+  "gravity_path": true,
+  "buckling_mode": true,
+  "mesh_convergence": true,
+  "restore_healthy": true,
+  "load_edit_invalidates_and_recomputes": true,
+  "add_remove_sensor": true,
+  "accept_recommended_sensors": true,
+  "demo_reset": true,
+  "geometry_reset": true
+}

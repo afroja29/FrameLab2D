@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FrameLab 2D OpenSees Live. Self-contained source, Python 3.12.
 Install: python -m pip install openseespy streamlit plotly numpy scipy pandas
-Run GUI: python -m streamlit run FrameLab2D_OpenSees_Live.py
+Run GUI: python -m streamlit run streamlit_app.py
 Run solver only: python FrameLab2D_OpenSees_Live.py --verify
 OpenSees is the structural solver; Streamlit/Plotly provide the interface.
 """
@@ -207,13 +207,18 @@ def make_model(c,healthy=False):
         try:selected=[int(x.strip())-1 for x in c['custom_members'].split(',')if x.strip()]
         except ValueError:raise ValueError('Custom member IDs must be comma-separated integers.')
         if any(x<0 or x>=len(edges)for x in selected):raise ValueError('A custom member ID is outside this frame. Inspect the member map.')
-    if healthy:selected=[]
+    if healthy or c.get('active_state')=='Healthy RC':selected=[]
     if not(0<=c['Ec_loss_pct']<=80 and 0<=c['As_loss_pct']<=80):raise ValueError('Loss percentages must be between 0 and 80.')
     el=[];audit=[]
     for e,(i,j)in enumerate(edges):
-        ce=c['Ec_loss_pct']/100 if e in selected else 0;ar=c['As_loss_pct']/100 if e in selected else 0;p=section(c,ce,ar)
+        ce=c['Ec_loss_pct']/100 if e in selected else 0;ar=c['As_loss_pct']/100 if e in selected else 0
+        if 'member_losses' in c and not healthy and c.get('active_state')!='Healthy RC':
+            if len(c['member_losses'])!=len(edges):raise ValueError('Member loss table does not match the current frame.')
+            entry=c['member_losses'][e];ce=float(entry['Ec_loss_pct'])/100;ar=float(entry['As_loss_pct'])/100
+            if not(np.isfinite(ce)and np.isfinite(ar)and 0<=ce<=.8 and 0<=ar<=.8):raise ValueError('Member loss must be finite and between 0 and 80%.')
+        p=section(c,ce,ar);p['EI']*=c.get('ei_factor',1.);p['Ieq']*=c.get('ei_factor',1.)
         el.append((i,j,c['Ec_GPa']*1e9,p['Aeq'],p['Ieq']))
-        audit.append(dict(Element=e+1,NodeI=i+1,NodeJ=j+1,Type=meta[e][0],Story=meta[e][1],Ec_loss_pct=ce*100,As_loss_pct=ar*100,EA_N=p['EA'],EI_Nm2=p['EI'],Aeq_m2=p['Aeq'],Ieq_m4=p['Ieq']))
+        audit.append(dict(Element=e+1,NodeI=i+1,NodeJ=j+1,Type=meta[e][0],Story=meta[e][1],Ec_loss_pct=ce*100,As_loss_pct=ar*100,EA_N=p['EA'],EI_Nm2=p['EI'],Aeq_m2=p['Aeq'],Ieq_m4=p['Ieq'],Steel_area_m2=p['As'],Steel_area_original_m2=p['As0']))
     F=np.zeros(3*len(xy));roof=np.arange(ns*nc,(ns+1)*nc);F[3*roof]=c['roof_kN']*1000/nc
     return dict(xy=xy,el=el,F=F,free=np.arange(3*nc,len(F)),roof=roof,ncols=nc,stories=ns,audit=audit)
 def refine(m,n):
@@ -299,6 +304,13 @@ def analyze_case(m,c):
             out['nonlinear']=dict(mesh=mesh_dict(mesh),u=un.tolist(),roof_mm=float(np.mean(un[3*m['roof']])*1000),first_order_combined_roof_mm=float(np.mean(first[3*m['roof']])*1000),nominal_N_over_Aeq_MPa=float(nominal))
         except Exception as exc:
             out['nonlinear']=dict(error=str(exc));rows.append(dict(Check='Nonlinear solution completed',RelativeError=None,Tolerance=1e-7,Pass=False))
+    if c['run_nonlinear']:
+        try:
+            out['buckling']=buckling_reference(m,c)
+            if out['buckling'].get('residual') is not None:
+                br=out['buckling']['residual'];rows.append(dict(Check='Reference buckling eigen-equation',RelativeError=br,Tolerance=1e-8,Pass=br<1e-8))
+        except Exception as exc:
+            out['buckling']=dict(error=str(exc));rows.append(dict(Check='Reference buckling completed',RelativeError=None,Tolerance=1e-8,Pass=False))
     out['all_checks_pass']=all(x['Pass']for x in rows);return out
 
 def run(c):
@@ -323,11 +335,13 @@ engine=SimpleNamespace(DEFAULT=DEFAULT,run=run,fingerprint=fingerprint,section=s
 # ---------- Comparison and visualization helpers ----------
 def is_screenshot_preset(c):
     keys=['stories','bays','width','height','Ec_GPa','Es_GPa','b_mm','h_mm','bars_per_face','diameter_mm','cover_mm','roof_kN','mass_tonne','damping_pct','frequency_Hz','dt','duration','gravity_kN','gravity_factor','segments','scope','Ec_loss_pct','As_loss_pct']
+    if c.get('active_state')=='Healthy RC' or c.get('ei_factor',1.)!=1.:return False
+    if 'member_losses' in c and any(x['Ec_loss_pct']!=10 or x['As_loss_pct']!=10 for x in c['member_losses']):return False
     return all(c[k]==DEFAULT[k]for k in keys)
 
 def comparison_rows(r):
     c=r['inputs'];preset=is_screenshot_preset(c);records=[]
-    for key,label in [('healthy','Healthy RC'),('active','Deteriorated RC' if c['scope']=='All members'and c['Ec_loss_pct']==10 and c['As_loss_pct']==10 else 'Active RC')]:
+    for key,label in [('healthy','Healthy RC'),('active',c.get('active_state','Deteriorated RC' if c['scope']=='All members'and c['Ec_loss_pct']==10 and c['As_loss_pct']==10 else 'Active RC'))]:
         a=r.get(key)
         if a is None:continue
         m=make_model(c,healthy=key=='healthy');ind=ref_linear(m);u=np.array(a['u']);K=ind['K'];fs=m['free'];md=np.array([c['mass_tonne']*1000/m['ncols']*(c['height']**2/12 if i%3==2 else 1) for i in fs]);w=np.sqrt(eigh(K[np.ix_(fs,fs)],np.diag(md),eigvals_only=True)[0]);cases=[]
@@ -388,7 +402,7 @@ import streamlit as st
 import plotly.graph_objects as go
 
 if '--verify' not in __import__('sys').argv:
-    st.set_page_config(page_title='OpenSees Live | FrameLab 2D',page_icon='🏗️',layout='wide')
+    st.set_page_config(page_title='FrameLab 2D | Live structural analysis',page_icon='🏗️',layout='wide')
 
 def draw(result,view,scale,labels,c):
     data=result;mesh=data['mesh'];u=np.array(data['u']);isforce=view in ['Bending moment','Axial force']
@@ -425,94 +439,450 @@ def draw(result,view,scale,labels,c):
     fig.update_layout(height=510,margin=dict(l=20,r=20,t=45,b=20),title=view+' | '+suffix,paper_bgcolor='white',plot_bgcolor='#f8fbfd',legend=dict(orientation='h',y=1.05),xaxis_title='X (m)',yaxis_title='Y (m)')
     fig.update_yaxes(scaleanchor='x',scaleratio=1);return fig
 
+# ---------- Connected seven-module workflow ----------
+import copy
+from itertools import combinations
+from scipy.linalg import eigh as symmetric_eigh
+
+DIRECTIONS = {'X displacement': 0, 'Y displacement': 1, 'Z rotation': 2}
+TAB_NAMES = ['1. Frame model', '2. Sensor network', '3. Damage diagnosis', '4. Dynamics', '5. Sensor placement', '6. P-Delta & buckling', '7. Exposure scenarios']
+
+def serial(v):
+    return json.loads(json.dumps(v,default=lambda x:x.item() if isinstance(x,np.generic) else x.tolist()))
+
+def scaled_model(m, element, loss):
+    q={**m,'el':list(m['el'])}
+    i,j,E,A,I=q['el'][element]
+    q['el'][element]=(i,j,E,A*(1-loss),I*(1-loss))
+    return q
+
+def static_trials(m, scenarios):
+    """One actual OpenSees static solve per member/loss trial, under the shared lock."""
+    out=[]
+    with LOCK:
+        try:
+            for element,loss in scenarios:
+                q=m if element is None else scaled_model(m,int(element),float(loss))
+                out.append(op_static(q)[0])
+        finally:ops.wipe()
+    return np.asarray(out)
+
+def sensor_dofs(sensors):
+    return np.array([3*(int(s['Node'])-1)+DIRECTIONS[s['Direction']] for s in sensors],dtype=int)
+
+def model_id(c):
+    return fingerprint({k:c[k] for k in ['stories','bays','width','height','Ec_GPa','Es_GPa','b_mm','h_mm','bars_per_face','diameter_mm','cover_mm','roof_kN','active_state','member_losses','ei_factor']})
+
+def sensitivity_report(m,sensors):
+    ds=sensor_dofs(sensors)
+    if not len(ds):raise ValueError('Add at least one sensor.')
+    uu=static_trials(m,[(None,0)]+[(e,.001)for e in range(len(m['el']))])
+    H=((uu[1:,ds]-uu[0,ds])/.001).T
+    scales=np.maximum(np.abs(uu[0,ds]),1e-6)
+    noise=np.array([s['Noise_percent']for s in sensors])/100
+    sigma=np.maximum(noise*scales,1e-9)
+    W=H/sigma[:,None];norms=np.linalg.norm(W,axis=0)
+    N=W/np.maximum(norms,1e-30)
+    sv=np.linalg.svd(N,compute_uv=False);rank=int(np.sum(sv>max(sv[0]if len(sv)else 0,1e-30)*1e-7))
+    return serial(dict(H=H,singular_values=sv,rank=rank,unresolved=len(m['el'])-rank,sigma=sigma))
+
+def simulate_measurements(m,sensors,hidden,loss,noise,seed):
+    ds=sensor_dofs(sensors)
+    if not len(ds):raise ValueError('Add at least one sensor before simulation.')
+    uu=static_trials(m,[(None,0),(hidden-1,loss)])
+    base,truth=uu[:,ds];percent=np.hypot([s['Noise_percent']for s in sensors],noise)
+    sigma=np.maximum(percent/100*np.maximum(np.maximum(abs(truth),abs(base)),1e-6),1e-9)
+    draws=np.random.default_rng(int(seed)).standard_normal(len(ds));draws[percent==0]=0
+    measured=truth+sigma*draws
+    rows=[]
+    for j,s in enumerate(sensors):
+        rows.append({**s,'DOF':int(ds[j]+1),'Unit':'rad'if ds[j]%3==2 else'm','Baseline':base[j],'Truth':truth[j],'Measured':measured[j],'Sigma':sigma[j],'Effective_noise_percent':percent[j],'Noise_Z':draws[j]})
+    return serial(dict(y=measured,sigma=sigma,truth_u=uu[1],rows=rows,hidden=hidden,loss=loss,seed=seed))
+
+def diagnose_model(m,sensors,data):
+    ds=sensor_dofs(sensors);y=np.array(data['y']);sigma=np.array(data['sigma']);nm=len(m['el'])
+    scenarios=[(e,k/100)for e in range(nm)for k in range(81)]
+    predictions=static_trials(m,scenarios)
+    residual=predictions[:,ds]-y
+    objective=np.sum((residual/sigma)**2,axis=1);rmse=np.sqrt(np.mean(residual**2,axis=1))
+    scan=[dict(Element=e+1,Alpha=loss,Objective=float(objective[i]),RMSE_raw=float(rmse[i]))for i,(e,loss)in enumerate(scenarios)]
+    best_indices=[e*81+int(np.argmin(objective[e*81:(e+1)*81]))for e in range(nm)]
+    best_indices.sort(key=lambda i:(objective[i],scenarios[i][0]))
+    best=best_indices[0];ind=ref_linear(scaled_model(m,*scenarios[best]))['u']
+    return serial(dict(candidates=[scan[i]for i in best_indices],scan=scan,best_u=predictions[best],predictions=predictions[best_indices],independent_relative_error=rel(ind,predictions[best]),fit_rows=[dict(Node=s['Node'],Direction=s['Direction'],Measured=float(y[j]),Predicted=float(predictions[best,ds[j]]),Sigma=float(sigma[j]),Weighted_residual=float(residual[best,j]/sigma[j]))for j,s in enumerate(sensors)]))
+
+def layout_score(pred,ds,sigma):
+    if not len(ds):return 0.
+    p,q=np.triu_indices(len(pred),1)
+    if not len(p):raise ValueError('At least two scenarios are required.')
+    delta=(pred[p][:,ds]-pred[q][:,ds])/sigma
+    return float(np.min(np.linalg.norm(delta,axis=1)))
+
+def greedy_layout(pred,existing,pool,count,sigma):
+    selected=[];scores=[]
+    for _ in range(min(int(count),len(pool))):
+        best=-np.inf;chosen=None
+        for d in pool:
+            if d in selected:continue
+            v=layout_score(pred,list(existing)+selected+[d],sigma)
+            if v>best+1e-12:best=v;chosen=int(d)
+        selected.append(chosen);scores.append(float(best))
+    return dict(dofs=selected,nodes=[d//3+1 for d in selected],scores=scores,final_score=layout_score(pred,list(existing)+selected,sigma))
+
+def optimize_sensors(c,sensors,count,sigma,loss,mode,diagnosis=None):
+    m=make_model(c);ds=sensor_dofs(sensors);allx=list(range(3*m['ncols'],len(m['F']),3));existing=[int(d)for d in ds if d%3==0]
+    pool=[d for d in allx if d not in existing]
+    if not pool:raise ValueError('All available horizontal channels already have sensors.')
+    if mode=='Diagnosis scenarios':
+        if diagnosis is None:raise ValueError('Run diagnosis on the current active model first, or select the controlled RC comparison.')
+        rows=diagnosis['candidates'][:5];pred=static_trials(m,[(x['Element']-1,x['Alpha'])for x in rows])
+        # This reproduces the MATLAB diagnosis-layout criterion: NEW channels only.
+        layout=greedy_layout(pred,[],pool,count,sigma)
+        return serial(dict(mode=mode,active=layout,scenarios=rows,predictions=pred,sigma=sigma,existing=existing,scenario_count=len(pred),criterion='New channels only; top five fitted single-member scenarios.'))
+    hm=make_model(c,True);scenarios=[(None,0)]+[(e,loss)for e in range(len(m['el']))]
+    ph=static_trials(hm,scenarios);pa=static_trials(m,scenarios)
+    h=greedy_layout(ph,existing,pool,count,sigma);a=greedy_layout(pa,existing,pool,count,sigma)
+    old_on_active=layout_score(pa,existing+h['dofs'],sigma)
+    return serial(dict(mode=mode,healthy=h,active=a,existing=existing,scenario_count=len(pa),sigma=sigma,additional_loss=loss,old_on_active=old_on_active,set_changed=set(h['dofs'])!=set(a['dofs']),order_changed=h['dofs']!=a['dofs'],predictions=pa,healthy_predictions=ph,criterion='Existing X channels plus selected channels; baseline and one additional-loss trial per member.'))
+
+def buckling_reference(m,c):
+    mesh=refine(m,int(c['segments']));unitc={**c,'gravity_factor':1.};Fg=gravity(mesh,unitc)
+    K=ref_linear(mesh)['K'];Kg=np.zeros_like(K)
+    if not np.any(Fg):return dict(factors=[],mode=[],residual=None,description='No reference gravity pattern.')
+    _,_,actions=op_static(mesh,Fg)
+    for e,row in enumerate(mesh['el']):
+        k,T,ids,L=ref_elt(mesh,row);N=actions[e,3];g=np.zeros((6,6));js=[1,2,4,5]
+        g[np.ix_(js,js)]=N/(30*L)*np.array([[36,3*L,-36,3*L],[3*L,4*L*L,-3*L,-L*L],[-36,-3*L,36,-3*L],[3*L,-L*L,-3*L,4*L*L]])
+        Kg[np.ix_(ids,ids)]+=T.T@g@T
+    fs=mesh['free'];kf=K[np.ix_(fs,fs)];gf=Kg[np.ix_(fs,fs)]
+    vals,V=symmetric_eigh(-gf,kf);keep=np.flatnonzero(vals>max(1e-14,np.max(abs(vals))*1e-10))[::-1][:5]
+    factors=1/vals[keep];modes=[];res=[]
+    for j,fac in zip(keep,factors):
+        u=np.zeros(len(K));v=V[:,j];v=v/max(abs(v));u[fs]=v;modes.append(u)
+        res.append(float(np.linalg.norm((kf+fac*gf)@v)/max(1e-30,(np.linalg.norm(kf)+fac*np.linalg.norm(gf))*np.linalg.norm(v))))
+    return serial(dict(factors=factors,mode=modes[0]if modes else[],residual=res[0]if res else None,mesh=mesh_dict(mesh),gravity_kN=c['gravity_kN']))
+
+def story_table(m,u1,u2,height):
+    result=[];nc=m['ncols']
+    for f in range(1,m['stories']+1):
+        hi=3*np.arange(f*nc,(f+1)*nc);lo=hi-3*nc;d1=(np.array(u1)[hi]-np.array(u1)[lo])*1000;d2=(np.array(u2)[hi]-np.array(u2)[lo])*1000
+        result.append(dict(Story=f,MeanDrift1_mm=float(np.mean(d1)),MeanDrift2_mm=float(np.mean(d2)),MeanDrift1_percent=float(np.mean(d1)/height/10),MeanDrift2_percent=float(np.mean(d2)/height/10),MaxColumnDrift2_percent=float(np.max(abs(d2))/height/10)))
+    return result
+
+def summary_metrics(m,a,c):
+    u=np.array(a['u']);nc=m['ncols'];dr=[abs(u[3*(f*nc+j)]-u[3*((f-1)*nc+j)])/c['height']*100 for f in range(1,m['stories']+1)for j in range(nc)]
+    return {'Roof mean X (mm)':a['roof_static_mm'],'Max column drift (%)':max(dr),'Compliance Fᵀu (N m)':float(m['F']@u)}
+
+def plan_figure(m,sensors,selected=None,healthy=None,affected=None):
+    # Fixed front-plane positions keep sensors independent of a scaled deformation plot.
+    dummy=dict(mesh=mesh_dict(m),u=np.zeros(len(m['F'])).tolist())
+    conf={'stories':m['stories'],'bays':m['ncols']-1,'width':np.ptp(m['xy'][:,0])/(m['ncols']-1),'height':np.ptp(m['xy'][:,1])/m['stories'],'roof_kN':0}
+    fig=draw(dummy,'Model and supports',0,True,conf)
+    for e,(i,j,*_) in enumerate(m['el']):
+        mid=(m['xy'][i]+m['xy'][j])/2;fig.add_annotation(x=mid[0],y=mid[1],text=f'E{e+1}',showarrow=False,xshift=10,yshift=8,font=dict(size=10,color='#65798a'))
+    if affected is not None:
+        i,j=map(int,m['el'][affected][:2]);fig.add_trace(go.Scatter(x=m['xy'][[i,j],0],y=m['xy'][[i,j],1],mode='lines',line=dict(color='#d8342f',width=6),name='Estimated member'))
+    for rows,symbol,color,name in [(sensors,'circle-open','#0075db','Existing sensors'),([dict(Node=d//3+1,Direction='X displacement')for d in (healthy or[])],'diamond-open','#008e65','Healthy recommendation'),([dict(Node=d//3+1,Direction='X displacement')for d in (selected or[])],'star','#ef8b00','Active recommendation')]:
+        if rows:
+            pts=np.array([m['xy'][int(s['Node'])-1]for s in rows]);text=[f"N{s['Node']}: {s['Direction'][0]}"for s in rows]
+            fig.add_trace(go.Scatter(x=pts[:,0],y=pts[:,1],mode='markers+text',marker=dict(symbol=symbol,size=18,line=dict(width=2,color=color),color=color),text=text,textposition='top left'if name=='Existing sensors'else'bottom right',name=name))
+    fig.update_layout(title='2D front view | fixed bases | sensor locations',height=540,legend=dict(orientation='h',y=1.18));return fig
+
+def clear_inference():
+    for k in ['measurements','diagnosis','placement','adequacy','load_path','mesh_check']:st.session_state.pop(k,None)
+
+def apply_exposure():
+    draft=st.session_state.exposure_draft
+    try:
+        for row in draft:
+            for k in ['Ec_loss_pct','As_loss_pct']:
+                v=float(row[k])
+                if not np.isfinite(v) or not 0<=v<=80:raise ValueError('Enter finite member losses from 0 to 80%.')
+    except (TypeError,ValueError) as exc:
+        st.session_state.exposure_error='Enter valid numeric Ec and steel-area losses (0–80%) in every row.'
+        return
+    st.session_state.pop('exposure_error',None)
+    st.session_state.member_losses=copy.deepcopy(draft)
+    st.session_state.active_state='Deteriorated RC';st.session_state.pop('result',None);clear_inference();st.session_state.pending_run=True
+
+def restore_healthy():
+    st.session_state.active_state='Healthy RC';st.session_state.pop('result',None);clear_inference();st.session_state.pending_run=True
+
+def load_demo():
+    for k,v in DEFAULT.items():
+        if k not in ['scope','custom_members','compare_healthy','Ec_loss_pct','As_loss_pct']:st.session_state[k]=v
+    for k in ['geometry_id','member_losses','exposure_draft','sensors','result','editor_revision']:st.session_state.pop(k,None)
+    st.session_state.active_state='Healthy RC';st.session_state.ei_factor=1.;clear_inference()
+
 def main():
-    st.title('OpenSees Live Analysis')
-    st.caption('FrameLab 2D independent RC model | actual OpenSees solver on every Run | inputs, results and verification together')
-    st.info('Screenshot preset loaded: 2 stories × 2 bays; RC 400 mm; losses 10% / 10% on all members. Run solves both healthy and deteriorated cases. Gravity factor = 5.')
-    c=dict(engine.DEFAULT)
+    st.title('FrameLab 2D')
+    st.caption('Structural Analysis, Deterioration Assessment and Sensor Placement · By Afroja Sultana')
+    st.caption('Live OpenSees structural responses · FrameLab diagnosis and greedy sensor-placement methods')
+    c=dict(DEFAULT)
     with st.sidebar:
-        st.header('Analysis inputs')
+        st.header('Shared model inputs')
+        st.button('LOAD RC DEMO',on_click=load_demo,key='load_demo',width='stretch')
         with st.expander('Geometry and supports',expanded=True):
             c['stories']=st.number_input('Stories',1,4,2,key='stories');c['bays']=st.number_input('Bays',1,3,2,key='bays')
             c['width']=st.number_input('Bay width (m)',1.,15.,6.,key='width');c['height']=st.number_input('Story height (m)',1.,8.,3.5,key='height')
-            st.caption('Fixed bases: Ux = Uy = Rz = 0. Three DOFs per joint; no rigid-floor constraint.')
+            st.caption('Fixed bases: Ux = Uy = Rz = 0. Online limit: 4 stories × 3 bays.')
         with st.expander('RC section and reinforcement'):
             c['Ec_GPa']=st.number_input('Concrete Ec (GPa)',1.,100.,30.,key='Ec_GPa');c['Es_GPa']=st.number_input('Steel Es (GPa)',1.,300.,200.,key='Es_GPa')
             c['b_mm']=st.number_input('Gross section width b (mm)',100.,1500.,400.,key='b_mm');c['h_mm']=st.number_input('Gross section depth h (mm)',100.,1500.,400.,key='h_mm')
             c['bars_per_face']=st.number_input('Bars per opposite face',1,12,2,key='bars_per_face');c['diameter_mm']=st.number_input('Bar diameter (mm)',4.,50.,16.,key='diameter_mm');c['cover_mm']=st.number_input('Bar-centre cover (mm)',5.,200.,50.,key='cover_mm')
-        with st.expander('Deterioration assumptions',expanded=True):
-            scopes=['No loss','Left columns','Bottom columns','All members','Custom member IDs'];c['scope']=st.selectbox('Members receiving losses',scopes,index=3,key='scope')
-            c['custom_members']=st.text_input('Custom IDs, comma-separated','1,6',key='custom_members',disabled=c['scope']!='Custom member IDs')
-            c['Ec_loss_pct']=st.number_input('Concrete modulus loss (%)',0.,80.,10.,key='Ec_loss_pct');c['As_loss_pct']=st.number_input('Steel area loss (%)',0.,80.,10.,key='As_loss_pct')
-            st.caption('Losses are assumptions. A chloride/sulfate label does not calculate deterioration.')
-        with st.expander('Lateral load and dynamics',expanded=True):
+        with st.expander('Load and dynamics'):
             c['roof_kN']=st.number_input('Total lateral roof force (kN)',-500.,500.,100.,key='roof_kN')
             c['run_dynamic']=st.checkbox('Run dynamic response',True,key='run_dynamic');c['mass_tonne']=st.number_input('Mass per floor (tonnes)',1.,1000.,80.,key='mass_tonne');c['damping_pct']=st.number_input('First-mode damping (%)',0.,30.,5.,key='damping_pct');c['frequency_Hz']=st.number_input('Applied harmonic force frequency (Hz)',.05,10.,1.2,key='frequency_Hz')
             c['dt']=st.number_input('Time step (s)',.005,.1,.02,step=.005,format='%.3f',key='dt');c['duration']=st.number_input('Duration (s)',.1,20.,6.,key='duration')
-        with st.expander('P-Delta inputs'):
-            c['run_nonlinear']=st.checkbox('Run corotational Newton analysis',True,key='run_nonlinear');c['gravity_kN']=st.number_input('Gravity per floor (kN)',0.,10000.,1000.,key='gravity_kN');c['gravity_factor']=st.number_input('Gravity multiplier',0.,50.,5.,key='gravity_factor');c['segments']=st.number_input('Segments per member',1,8,4,key='segments')
-        c['compare_healthy']=st.checkbox('Also solve matching healthy RC baseline',True,key='compare_healthy')
-        run=st.button('RUN LIVE OPENSEES ANALYSIS',type='primary',use_container_width=True,key='run_analysis')
-    if run:
+        with st.expander('P-Delta settings'):
+            c['run_nonlinear']=st.checkbox('Run corotational Newton analysis',True,key='run_nonlinear');c['gravity_kN']=st.number_input('Gravity per floor (kN)',0.,10000.,1000.,key='gravity_kN');c['gravity_factor']=st.number_input('Gravity multiplier',0.,50.,5.,key='gravity_factor');c['segments']=st.number_input('Segments per member',1,8,4,key='segments');c['ei_factor']=st.number_input('Effective EI factor (all modules)',.1,1.,1.,key='ei_factor')
+        st.radio('Active model',['Healthy RC','Deteriorated RC'],key='active_state')
+        st.caption('Exposure losses affect every response module only when Deteriorated RC is active. Diagnosis tests additional loss.')
+    geom=(c['stories'],c['bays'])
+    if st.session_state.get('geometry_id')!=geom:
+        st.session_state.geometry_id=geom
+        preview=make_model({**c,'active_state':'Healthy RC'})
+        rows=[dict(Element=r['Element'],Type=r['Type'],Story=r['Story'],Exposure='Combined',Ec_loss_pct=10.,As_loss_pct=10.)for r in preview['audit']]
+        st.session_state.member_losses=copy.deepcopy(rows);st.session_state.exposure_draft=copy.deepcopy(rows)
+        nc=c['bays']+1;nodes=sorted(set([2*nc,(c['stories']+1)*nc]))
+        st.session_state.sensors=[dict(Node=n,Direction='X displacement',Noise_percent=1.)for n in nodes]
+        st.session_state.editor_revision=st.session_state.get('editor_revision',0)+1
+        clear_inference()
+    c['active_state']=st.session_state.active_state;c['member_losses']=st.session_state.member_losses;c['compare_healthy']=True
+    try:m=make_model(c);healthy_m=make_model(c,True)
+    except Exception as exc:st.error(str(exc));return
+    key=model_id(c);ds=sensor_dofs(st.session_state.sensors);sk=fingerprint([key,st.session_state.sensors])
+    current_hash=fingerprint(c);r=st.session_state.get('result')
+    if r is not None and r['input_hash']!=current_hash:r=None
+    st.info(f"Active: {c['active_state']} | {c['stories']} stories × {c['bays']} bays | {len(m['el'])} members | roof load {c['roof_kN']:g} kN | {len(ds)} sensors")
+    run_pressed=st.button('RUN LIVE OPENSEES ANALYSIS',type='primary',key='run_analysis',width='stretch')
+    if run_pressed or st.session_state.pop('pending_run',False):
         try:
-            with st.spinner('Building models and running fresh OpenSees + independent matrix calculations...'):
-                result=engine.run(c)
-            st.session_state['result']=result
-        except Exception as exc:
-            st.session_state.pop('result',None);st.error(str(exc));return
-    r=st.session_state.get('result')
-    if r is None:
-        st.info('Enter or review the inputs, then click RUN LIVE OPENSEES ANALYSIS. No result is shown before a real solve.')
-        st.subheader('Current input draft');st.json(c);return
-    if r['input_hash']!=engine.fingerprint(c):
-        st.warning('Inputs changed. The previous results are hidden. Click RUN LIVE OPENSEES ANALYSIS to solve these new inputs.')
-        st.subheader('New input draft');st.json(c);return
-    st.caption(f"OpenSees {r['opensees_version']} | Run ID {r['run_id']} | UTC {r['timestamp_utc']} | Solve time {r['elapsed_s']:.2f} s")
-    a=r['active'];labels={'Active RC':a}
-    if r['healthy']is not None:labels['Healthy RC baseline']=r['healthy']
-    which=st.radio('Display results for',list(labels),horizontal=True,key='case_display');a=labels[which]
-    if a['all_checks_pass']:st.success('PASS: this run agrees with the independent matrix calculation and the listed equilibrium/residual checks.')
-    else:st.error('Some requested checks did not pass or a solve was incomplete. Inspect verification details; do not accept this run as verified.')
-    col=st.columns(4);col[0].metric('Static mean roof X',f"{a['roof_static_mm']:.6f} mm");col[1].metric('First natural frequency',f"{a['freq_Hz'][0]:.6f} Hz")
-    col[2].metric('Dynamic roof peak',f"{a['dynamic']['roof_peak_mm']:.6f} mm"if'dynamic'in a else'Not run');col[3].metric('P-Delta mean roof',f"{a['nonlinear']['roof_mm']:.6f} mm"if'nonlinear'in a and'error'not in a['nonlinear']else'Not completed')
-    st.subheader('Live OpenSees versus independent calculation')
-    st.dataframe(pd.DataFrame(comparison_rows(r)),hide_index=True,use_container_width=True)
-    st.caption('The stored MATLAB screenshot column is a reference, not a new MATLAB solve. It is shown only for the exact matching preset. Sensor diagnosis and placement are not OpenSees built-in verifications in this companion.')
-    tabs=st.tabs(['Model and diagrams','Inputs actually used','Verification','Tables and export'])
+            with st.spinner('Solving active and healthy RC in OpenSees; checking independent equations...'):r=run(c)
+            st.session_state.result=r
+        except Exception as exc:st.error(str(exc));r=None
+    if r is None:st.caption('Inputs are ready. Click Run for static, modal, dynamic and stability results. Sensor studies can also be run from their tabs.')
+    else:st.caption(f"OpenSees {r['opensees_version']} | Run ID {r['run_id']} | solved in {r['elapsed_s']:.2f} s | all tabs use this shared active RC model")
+    tabs=st.tabs(TAB_NAMES)
     with tabs[0]:
-        view=st.selectbox('Diagram',['Model and supports','Static deformation','First vibration mode','P-Delta deformation','Bending moment','Axial force'],index=1,key='diagram')
-        scale=st.slider('Deformation magnification (display only)',1,300,100,key='magnification');labels_on=st.checkbox('Show original node IDs',True,key='labels')
-        fig=draw(a,view,scale,labels_on,c)
-        if fig is not None:st.plotly_chart(fig,use_container_width=True)
-        elif'nonlinear'in a and'error'in a['nonlinear']:st.error(a['nonlinear']['error'])
-        else:st.info('Enable and run P-Delta to display this diagram.')
-        if view=='First vibration mode':st.caption('This is a vibration eigenmode with arbitrary amplitude, not a buckling mode or a physical displacement prediction.')
-        if'dynamic'in a:
-            if st.checkbox('Show animated displacement playback',True,key='show_animation'):
-                st.plotly_chart(dynamic_animation(a,c),use_container_width=True)
-                st.caption('Play replays the freshly computed time history. Use Run Analysis to calculate again after changing inputs.')
-            d=a['dynamic'];fig=go.Figure()
-            for j,y in enumerate(d['floor_mm']):fig.add_trace(go.Scatter(x=d['time_s'],y=y,name=f'Floor {j+1}'))
-            fig.update_layout(title='Actual OpenSees harmonic-force response',xaxis_title='Time (s)',yaxis_title='Mean floor X (mm)',height=350);st.plotly_chart(fig,use_container_width=True)
+        if r:
+            a=r['active'];metrics=summary_metrics(m,a,c);cols=st.columns(3)
+            for col,(name,value)in zip(cols,metrics.items()):col.metric(name,f'{value:.6f}')
+            if a['all_checks_pass']:st.success('OpenSees results pass the independent matrix and equilibrium checks for this run.')
+            else:st.error('One or more requested checks failed. Inspect verification below.')
+            view=st.selectbox('Diagram',['Model and supports','Static deformation','First vibration mode','Bending moment','Axial force'],index=1,key='diagram')
+            scale=st.slider('Deformation magnification (display only)',1,300,100,key='magnification');st.plotly_chart(draw(a,view,scale,True,c),width='stretch',key='static_plot')
+            with st.expander('Verification, actual inputs and downloads'):
+                st.dataframe(pd.DataFrame(comparison_rows(r)),hide_index=True,width='stretch')
+                st.dataframe(pd.DataFrame(a['checks']),hide_index=True,width='stretch');st.json(c)
+                st.download_button('Download full run JSON',json.dumps(r,indent=2),file_name=f"FrameLab_run_{r['run_id']}.json",mime='application/json')
+                nodal=pd.DataFrame(np.array(a['u']).reshape(-1,3),columns=['Ux_m','Uy_m','Rz_rad']);nodal.insert(0,'Node',np.arange(1,len(nodal)+1))
+                st.download_button('Download node CSV',nodal.to_csv(index=False),file_name='FrameLab_nodes.csv')
+                st.latex(r'\mathbf F=\mathbf K\mathbf u,\qquad \mathbf K=\sum_e\mathbf A_e^T\mathbf T_e^T\mathbf k_e\mathbf T_e\mathbf A_e')
+        else:st.plotly_chart(plan_figure(m,[]),width='stretch',key='preview')
+        st.caption('Uncracked elastic RC, perfect bond, fixed bases, no diaphragm. Online limits keep live calculations manageable; no material capacity check is implied.')
     with tabs[1]:
-        st.subheader('Frozen input record for this exact run');st.json(r['inputs']);p=engine.section(c)
-        st.write(f"Gross A = {p['Ag']:.9g} m²; gross I = {p['Ig']:.9g} m⁴. Each roof node receives {c['roof_kN']/(c['bays']+1):.6f} kN.")
-        st.write('Time histories use t=0, dt, 2dt, ... up to the last grid point not exceeding the requested duration.');st.write('Element IDs, selected losses and actual solver stiffnesses:');st.dataframe(pd.DataFrame(a['sections']),hide_index=True,use_container_width=True)
-        st.info('Uncracked rectangular RC, symmetric bars, perfect bond, removed steel remains void. No cracking, yield, bond-slip or exposure-time model.')
+        st.subheader('Existing sensor network')
+        ca,cb,cc=st.columns(3)
+        node=ca.number_input('Sensor node',m['ncols']+1,len(m['xy']),len(m['xy']),key='sensor_node')
+        direction=cb.selectbox('Measurement direction',list(DIRECTIONS),key='sensor_direction');snoise=cc.number_input('Channel noise (%)',0.,20.,1.,key='sensor_noise')
+        if st.button('ADD SENSOR',key='add_sensor'):
+            s=dict(Node=int(node),Direction=direction,Noise_percent=float(snoise))
+            if any(x['Node']==s['Node']and x['Direction']==s['Direction']for x in st.session_state.sensors):st.warning('This channel already exists. Remove it before changing its noise.')
+            else:st.session_state.sensors.append(s);clear_inference();st.rerun()
+        sensor_rows=[{**s,'Channel':i+1,'DOF':int(sensor_dofs([s])[0]+1)}for i,s in enumerate(st.session_state.sensors)]
+        st.dataframe(pd.DataFrame(sensor_rows),hide_index=True,width='stretch')
+        if sensor_rows:
+            remove=st.selectbox('Channel to remove',list(range(1,len(sensor_rows)+1)),key='remove_channel')
+            if st.button('REMOVE SELECTED',key='remove_sensor'):st.session_state.sensors.pop(remove-1);clear_inference();st.rerun()
+        st.plotly_chart(plan_figure(m,st.session_state.sensors),width='stretch',key='network_plot')
+        if st.button('CHECK SENSOR LIMITATIONS',key='sensor_adequacy'):
+            try:
+                with st.spinner('Computing OpenSees finite-difference sensitivity...'):rep=sensitivity_report(m,st.session_state.sensors)
+                st.session_state.adequacy=dict(key=sk,data=rep)
+            except Exception as exc:st.error(str(exc))
+        adeq=st.session_state.get('adequacy')
+        if adeq and adeq['key']==sk:
+            rep=adeq['data'];st.write(f"{len(ds)} channels; sensitivity rank {rep['rank']}/{len(m['el'])}; {rep['unresolved']} unresolved parameter combinations.")
+            if rep['unresolved']:st.warning('Simultaneous loss in all members cannot be independently identified. A single-member hypothesis can still be tested; ranking is not confidence.')
+            fig=go.Figure(go.Bar(x=list(range(1,len(rep['singular_values'])+1)),y=rep['singular_values']));fig.update_layout(xaxis_title='Singular-value index',yaxis_title='Column-normalized weighted sensitivity',height=300);st.plotly_chart(fig,key='sensitivity_plot',width='stretch')
+            st.download_button('Download sensitivity CSV',pd.DataFrame(rep['H']).to_csv(index=False),file_name='FrameLab_sensitivity.csv')
     with tabs[2]:
-        st.subheader('Independent checks computed during this run');st.dataframe(pd.DataFrame(a['checks']),hide_index=True,use_container_width=True)
-        st.json(a['equilibrium'])
-        st.caption('Two implementations share the stated assumptions but use separate structural solvers. Agreement checks equation implementation; it does not validate real material capacity or omitted physics.')
-        st.latex(r'\mathbf F=\mathbf K\mathbf u,\quad\mathbf k_e^g=\mathbf T^T\mathbf k_e^\ell\mathbf T,\quad\mathbf K_T\Delta\mathbf u=\mathbf F_{ext}-\mathbf f_{int}')
-        st.write('Dynamics: Newmark β=1/4, γ=1/2. Damping C=2ζω₁M. Translational nodal mass equals floor mass/(bays+1); rotary inertia is an assumed nodal mass × story height²/12.')
-        if'nonlinear'in a and'error'not in a['nonlinear']:st.write(f"Nominal max |N|/Aeq = {a['nonlinear']['nominal_N_over_Aeq_MPa']:.3f} MPa. This is not a constituent stress or strength check.")
-        st.warning('Reference buckling multipliers and noisy inverse diagnosis are outside this live app. A single mesh or time step does not establish convergence.')
+        st.subheader('Additional single-member stiffness loss')
+        ca,cb=st.columns(2);hidden=ca.number_input('Hidden member',1,len(m['el']),1,key='hidden_member');loss=cb.slider('Additional stiffness loss (%)',0,80,30,key='damage_loss')/100
+        ca,cb=st.columns(2);noise=ca.number_input('Extra simulation noise (%)',0.,20.,0.,key='simulation_noise');seed=cb.number_input('Random seed',0,999999,7405,key='noise_seed')
+        st.caption('Additional loss multiplies both EA and EI of one member. Channel and extra noise combine in quadrature. Set BOTH noise inputs to zero for an exact recovery test. Python and MATLAB random draws need not match.')
+        measurement_key=fingerprint([sk,int(hidden),loss,noise,int(seed)])
+        if st.button('SIMULATE DATA',key='simulate_data'):
+            try:
+                data=simulate_measurements(m,st.session_state.sensors,int(hidden),loss,noise,int(seed));st.session_state.measurements=dict(key=measurement_key,data=data);st.session_state.pop('diagnosis',None);st.session_state.pop('placement',None)
+            except Exception as exc:st.error(str(exc))
+        data_state=st.session_state.get('measurements');data=data_state['data']if data_state and data_state['key']==measurement_key else None
+        if data:
+            st.dataframe(pd.DataFrame(data['rows']),hide_index=True,width='stretch')
+            st.download_button('Download actual measurements CSV',pd.DataFrame(data['rows']).to_csv(index=False),file_name='FrameLab_measurements.csv')
+        else:st.info('Simulate measurements after selecting the model, channels and noise settings.')
+        if st.button('RUN DIAGNOSIS',key='run_diagnosis',disabled=data is None):
+            try:
+                with st.spinner('OpenSees is solving every member at 0–80% additional loss, in 1% steps...'):diag=diagnose_model(m,st.session_state.sensors,data)
+                st.session_state.diagnosis=dict(key=measurement_key,model_sensor_key=sk,data=diag);st.session_state.pop('placement',None)
+            except Exception as exc:st.error(str(exc))
+        diag_state=st.session_state.get('diagnosis');diag=diag_state['data']if diag_state and diag_state['key']==measurement_key else None
+        if diag:
+            best=diag['candidates'][0];st.success(f"Best fit: E{best['Element']}, {best['Alpha']*100:.0f}% additional loss | J = {best['Objective']:.6g} | raw RMSE = {best['RMSE_raw']:.6g}")
+            st.plotly_chart(plan_figure(m,st.session_state.sensors,affected=best['Element']-1),width='stretch',key='diagnosis_plan')
+            st.dataframe(pd.DataFrame(diag['candidates']),hide_index=True,width='stretch')
+            chart=go.Figure(go.Bar(x=[x['Element']for x in diag['candidates']],y=[x['Alpha']*100 for x in diag['candidates']]));chart.update_layout(xaxis_title='Candidate element',yaxis_title='Best-fit additional loss (%)',height=300);st.plotly_chart(chart,width='stretch',key='diagnosis_chart')
+            st.dataframe(pd.DataFrame(diag['fit_rows']),hide_index=True,width='stretch')
+            gap=diag['candidates'][1]['Objective']-best['Objective']if len(diag['candidates'])>1 else 0
+            st.caption('Raw RMSE uses the channel units; with mixed translations and rotations use the dimensionless weighted objective for ranking.')
+            st.caption(f"Next-candidate objective gap: {gap:.6g}. Ranking is not probability or confidence. Independent best-fit displacement difference: {diag['independent_relative_error']:.3g}.")
+            st.latex(r'J(e,\alpha)=\sum_i[(y_i-u_i(e,\alpha))/\sigma_i]^2,\qquad (\hat e,\hat\alpha)=\arg\min J')
+            st.download_button('Download complete trial scan CSV',pd.DataFrame(diag['scan']).to_csv(index=False),file_name='FrameLab_diagnosis_scan.csv')
     with tabs[3]:
-        u=np.array(a['u']).reshape(-1,3);df=pd.DataFrame(dict(Node=np.arange(1,len(u)+1),Ux_mm=u[:,0]*1000,Uy_mm=u[:,1]*1000,Rz_rad=u[:,2]));st.dataframe(df,hide_index=True,use_container_width=True)
-        force=pd.DataFrame(a['local_end_forces'],columns=['Ni_N','Vi_N','Mi_Nm','Nj_N','Vj_N','Mj_Nm']);force.insert(0,'Element',np.arange(1,len(force)+1));st.dataframe(force,hide_index=True,use_container_width=True)
-        st.download_button('Download this run: inputs + actual results + checks (JSON)',json.dumps(r,indent=2),file_name=f"OpenSees_run_{r['run_id']}.json",mime='application/json')
-        st.download_button('Download nodal results CSV',df.to_csv(index=False),file_name=f"OpenSees_nodes_{r['run_id']}.csv",mime='text/csv')
-    st.caption('Live engineering app: fresh OpenSees solves on Run. Plot zoom, selected view and magnification do not change the analysis inputs. No MATLAB GUI run is implied.')
+        st.subheader('Linear harmonic dynamic response')
+        if r and 'dynamic'in r['active']:
+            a=r['active'];cols=st.columns(2);cols[0].metric('First natural frequency',f"{a['freq_Hz'][0]:.6f} Hz");cols[1].metric('Peak mean roof response',f"{a['dynamic']['roof_peak_mm']:.6f} mm")
+            st.plotly_chart(dynamic_animation(a,c),width='stretch',key='dynamic_animation')
+            fig=go.Figure()
+            for j,y in enumerate(a['dynamic']['floor_mm']):fig.add_trace(go.Scatter(x=a['dynamic']['time_s'],y=y,name=f'Floor {j+1}'))
+            fig.update_layout(xaxis_title='Time (s)',yaxis_title='Mean floor X (mm)',height=400);st.plotly_chart(fig,width='stretch',key='dynamic_history')
+            dd=pd.DataFrame({'Time_s':a['dynamic']['time_s'],**{f'Floor_{j+1}_mm':v for j,v in enumerate(a['dynamic']['floor_mm'])}});st.download_button('Download dynamic histories CSV',dd.to_csv(index=False),file_name='FrameLab_dynamics.csv')
+            st.latex(r'\mathbf M\ddot{\mathbf u}+\mathbf C\dot{\mathbf u}+\mathbf K\mathbf u=\mathbf F\sin(2\pi f t),\quad \mathbf C=2\zeta\omega_1\mathbf M')
+            st.caption('Play replays this freshly solved response. Applied harmonic roof force, not base acceleration. Newmark β=¼, γ=½; nodal rotary inertia = nodal mass × story height²/12.')
+        else:st.info('Enable dynamic response in the sidebar, then run the shared analysis.')
+    with tabs[4]:
+        st.subheader('Greedy sensor placement')
+        mode=st.selectbox('Scenario mode',['Diagnosis scenarios','Healthy vs deteriorated RC'],key='optimization_mode')
+        if mode=='Healthy vs deteriorated RC' and c['active_state']=='Healthy RC':st.info('The active model is healthy. These layouts will be identical until an exposure scenario is applied in tab 7.')
+        ca,cb,cc=st.columns(3);count=ca.number_input('New X sensors',1,12,2,key='new_sensors');sigma=cb.number_input('Comparison sigma X (mm)',.001,10.,.1,format='%.3f',key='comparison_sigma')/1000;design_loss=cc.number_input('Design additional loss (%)',1.,80.,30.,key='design_loss')/100
+        opt_key=fingerprint([sk,mode,count,sigma,design_loss,measurement_key if mode=='Diagnosis scenarios'else None])
+        ds_now=st.session_state.get('diagnosis');opt_diag=ds_now['data']if ds_now and ds_now['key']==measurement_key else None
+        opt_clicked=st.button('OPTIMIZE SENSOR LOCATIONS',key='optimize_sensors')
+        reopt=st.session_state.pop('request_reoptimization',False)
+        if reopt:
+            mode='Healthy vs deteriorated RC';opt_key=fingerprint([sk,mode,count,sigma,design_loss,None])
+        if opt_clicked or reopt:
+            try:
+                with st.spinner('OpenSees trial responses and greedy maximin scenario separation...'):placement=optimize_sensors(c,st.session_state.sensors,count,sigma,design_loss,mode,opt_diag)
+                st.session_state.placement=dict(key=opt_key,model_sensor_key=sk,data=placement)
+            except Exception as exc:st.error(str(exc))
+        p_state=st.session_state.get('placement');p=p_state['data']if p_state and p_state['key']==opt_key else None
+        if p:
+            a=p['active'];h=p.get('healthy');st.plotly_chart(plan_figure(m,st.session_state.sensors,a['dofs'],h['dofs']if h else[]),width='stretch',key='placement_plot')
+            rows=[]
+            for i,(d,score)in enumerate(zip(a['dofs'],a['scores'])):
+                row=dict(Pick=i+1,Active_node=d//3+1,DOF=d+1,Direction='X',Separation_score=score)
+                if h:row.update(Healthy_node=h['nodes'][i],Pick_changed=h['dofs'][i]!=d,Healthy_score=h['scores'][i])
+                rows.append(row)
+            st.dataframe(pd.DataFrame(rows),hide_index=True,width='stretch')
+            st.write(f"Recommended nodes: {a['nodes']} | minimum cumulative separation {a['final_score']:.6g} sigma | {p['scenario_count']} scenarios")
+            if h:
+                metrics=[{'Metric':'Existing X channels only','Healthy':layout_score(np.array(p['healthy_predictions']),p['existing'],sigma),'Active':layout_score(np.array(p['predictions']),p['existing'],sigma)},{'Metric':'Re-optimized layout score','Healthy':h['final_score'],'Active':a['final_score']},{'Metric':'Healthy layout evaluated on each model','Healthy':h['final_score'],'Active':p['old_on_active']}]
+                st.dataframe(pd.DataFrame(metrics),hide_index=True,width='stretch')
+                st.info(f"Layout set changed: {p['set_changed']}. Pick order changed: {p['order_changed']}. Old layout on active RC: {p['old_on_active']:.6g}; new layout: {a['final_score']:.6g}. Uniform losses can change scores without changing locations.")
+                st.caption('Green diamonds: healthy recommendation. Orange stars: active recommendation. Blue circles: existing sensors. Same scenarios, sensor budget and absolute noise in both models.')
+            st.caption(p['criterion']+' Scores below 1 sigma mean weak minimum separation. Greedy selection is not a guaranteed global optimum.')
+            st.latex(r'j^*=\arg\max_j\min_{p<q}\sqrt{\sum_{i\in S\cup\{j\}}[(u_i^{(p)}-u_i^{(q)})/\sigma]^2}')
+            st.download_button('Download placement audit JSON',json.dumps(p,indent=2),file_name='FrameLab_sensor_placement.json')
+            def accept_layout(dofs=tuple(a['dofs'])):
+                for d in dofs:st.session_state.sensors.append(dict(Node=d//3+1,Direction='X displacement',Noise_percent=1.))
+                clear_inference()
+            st.button('ADD RECOMMENDED SENSORS TO NETWORK',key='accept_layout',on_click=accept_layout)
+        else:st.info('Run diagnosis first for fitted scenarios, or choose Healthy vs deteriorated RC for a controlled design comparison.')
+    with tabs[5]:
+        st.subheader('Geometric nonlinear equilibrium and reference buckling')
+        if r and 'nonlinear'in r['active']:
+            a=r['active'];nl=a['nonlinear'];bk=a.get('buckling',{})
+            if 'error'in nl:st.error(nl['error'])
+            else:
+                first=nl['first_order_combined_roof_mm'];second=nl['roof_mm'];cols=st.columns(3);cols[0].metric('First-order mean roof',f'{first:.6f} mm');cols[1].metric('Newton mean roof',f'{second:.6f} mm');cols[2].metric('Amplification',f'{second/first:.6f}'if abs(first)>1e-12 else'Undefined')
+                st.plotly_chart(draw(a,'P-Delta deformation',100,True,c),width='stretch',key='pdelta_plot')
+                mesh=refine(m,int(c['segments']));u1=ref_linear(mesh,F=mesh['F']+gravity(mesh,c))['u']
+                st.dataframe(pd.DataFrame(story_table(m,u1,nl['u'],c['height'])),hide_index=True,width='stretch')
+                st.download_button('Download stability results JSON',json.dumps({'inputs':c,'nonlinear':nl,'buckling':bk},indent=2),file_name='FrameLab_stability.json')
+            if bk.get('factors'):
+                critical=bk['factors'][0];st.write(f"Reference elastic critical gravity factor: {critical:.6f}; applied/reference = {c['gravity_factor']/critical:.6f}; eigen-equation residual = {bk['residual']:.3g}.")
+                bview=st.checkbox('Show first reference buckling mode',key='show_buckling')
+                if bview:
+                    dummy={'mesh':bk['mesh'],'u':bk['mode'],'mode1':bk['mode']};st.plotly_chart(draw(dummy,'First vibration mode',1,True,c).update_layout(title='Reference elastic buckling mode | arbitrary amplitude'),key='buckling_mode',width='stretch')
+                st.dataframe(pd.DataFrame({'Mode':range(1,len(bk['factors'])+1),'Reference_factor':bk['factors']}),hide_index=True,width='stretch')
+                if c['gravity_factor']>=critical:st.warning('Applied gravity reaches/exceeds the elastic reference. Do not interpret a converged algebraic solution as a stable capacity result.')
+            if st.button('CALCULATE GRAVITY–SWAY PATH',key='load_path_button'):
+                path=[]
+                with st.spinner('Solving independent OpenSees states along the gravity path...'):
+                    mesh=refine(m,int(c['segments']));upper=min(max(1.,c['gravity_factor']*1.1),.85*bk['factors'][0])if bk.get('factors')else max(1.,c['gravity_factor']*1.1)
+                    with LOCK:
+                        try:
+                            for factor in np.unique(np.r_[np.linspace(0,upper,13),c['gravity_factor']]):
+                                try:
+                                    uu,_,_=op_static(mesh,mesh['F']+gravity(mesh,{**c,'gravity_factor':float(factor)}),True);path.append(dict(Gravity_factor=float(factor),Roof_X_mm=float(np.mean(uu[3*m['roof']])*1000)))
+                                except Exception:break
+                        finally:ops.wipe()
+                st.session_state.load_path=dict(key=current_hash,rows=path)
+            path=st.session_state.get('load_path')
+            if path and path['key']==current_hash:
+                fig=go.Figure(go.Scatter(x=[v['Roof_X_mm']for v in path['rows']],y=[v['Gravity_factor']for v in path['rows']],mode='lines+markers'));fig.update_layout(xaxis_title='Mean roof X (mm)',yaxis_title='Gravity multiplier',height=350);st.plotly_chart(fig,key='gravity_path',width='stretch')
+            with st.expander('Equations and mesh convergence'):
+                st.latex(r'\mathbf K_T\Delta\mathbf u=\mathbf F_{ext}-\mathbf f_{int},\qquad(\mathbf K+\lambda_{cr}\mathbf K_g)\boldsymbol\phi=0')
+                st.caption('Reference buckling uses elastic stiffness and geometric stiffness from OpenSees gravity-only axial forces at multiplier 1. It is a custom matrix eigenvalue calculation, not a native OpenSees buckling command or collapse prediction.')
+                if st.button('CHECK CURRENT MESH AGAINST FINER MESH',key='mesh_check_button'):
+                    try:
+                        finer=min(8,int(c['segments'])*2)
+                        if finer==c['segments']:raise ValueError('Already at the maximum online subdivision. Reduce the current mesh to compare.')
+                        cm={**c,'segments':finer};fm=refine(m,finer)
+                        if len(fm['el'])>160:raise ValueError('The finer mesh exceeds the 160-element online limit. Use a smaller frame.')
+                        with LOCK:
+                            try:uf,_,_=op_static(fm,fm['F']+gravity(fm,cm),True)
+                            finally:ops.wipe()
+                        val=float(np.mean(uf[3*m['roof']])*1000);st.session_state.mesh_check=dict(key=current_hash,finer=finer,roof=val,difference_pct=100*abs(val-nl['roof_mm'])/max(abs(val),1e-12))
+                    except Exception as exc:st.error(str(exc))
+                ch=st.session_state.get('mesh_check')
+                if ch and ch['key']==current_hash:st.write(f"{c['segments']} → {ch['finer']} segments/member: finer roof {ch['roof']:.6f} mm, relative difference {ch['difference_pct']:.5g}%.")
+        else:st.info('Enable corotational Newton analysis in the sidebar and run the shared analysis.')
+        st.caption('Elastic materials only; geometry is nonlinear. A small residual proves numerical equilibrium, not real-world safety. No yield, cracking, crushing or bond failure is simulated.')
+    with tabs[6]:
+        st.subheader('Assumed exposure-related deterioration')
+        if st.session_state.get('exposure_error'):st.error(st.session_state.exposure_error)
+        st.caption('Exposure labels are descriptions. Enter assumed Ec loss and steel AREA loss; steel Es stays constant. The model does not predict losses from chloride/sulfate exposure or elapsed time.')
+        ca,cb,cc=st.columns(3);group=ca.selectbox('Assign to group',['All members','Columns','Beams','Bottom columns','Left columns','Selected story'],key='exposure_group');story=cb.number_input('Exposure story',1,c['stories'],1,key='exposure_story');label=cc.selectbox('Exposure label',['Normal','Sulfate','Chloride / seawater','Combined'],index=3,key='exposure_label')
+        ca,cb=st.columns(2);ce=ca.number_input('Assumed Ec loss (%)',0.,80.,10.,key='assign_ec');ar=cb.number_input('Assumed steel area loss (%)',0.,80.,10.,key='assign_as')
+        if st.button('ASSIGN TO GROUP',key='assign_exposure'):
+            draft=copy.deepcopy(st.session_state.exposure_draft)
+            for row in draft:
+                i=row['Element']-1;col=int(m['el'][i][0])%m['ncols']
+                use=group=='All members'or(group=='Columns'and row['Type']=='Column')or(group=='Beams'and row['Type']=='Beam')or(group=='Bottom columns'and row['Type']=='Column'and row['Story']==1)or(group=='Left columns'and row['Type']=='Column'and col==0)or(group=='Selected story'and row['Story']==story)
+                if use:row.update(Exposure=label,Ec_loss_pct=ce,As_loss_pct=ar)
+            st.session_state.exposure_draft=draft;st.session_state.editor_revision+=1
+        edited=st.data_editor(pd.DataFrame(st.session_state.exposure_draft),hide_index=True,width='stretch',disabled=['Element','Type','Story'],column_config={'Exposure':st.column_config.SelectboxColumn(options=['Normal','Sulfate','Chloride / seawater','Combined']),'Ec_loss_pct':st.column_config.NumberColumn(min_value=0,max_value=80),'As_loss_pct':st.column_config.NumberColumn(min_value=0,max_value=80)},key=f"exposure_editor_{st.session_state.editor_revision}")
+        st.session_state.exposure_draft=edited.to_dict('records')
+        ca,cb,cc=st.columns(3);ca.button('APPLY AND COMPARE',on_click=apply_exposure,key='apply_exposure',width='stretch');cb.button('RESTORE HEALTHY RC',on_click=restore_healthy,key='restore_healthy',width='stretch')
+        def queue_optimization():
+            st.session_state.optimization_mode='Healthy vs deteriorated RC';st.session_state.request_reoptimization=True
+        cc.button('RE-OPTIMIZE SENSORS',on_click=queue_optimization,key='exposure_reopt',width='stretch')
+        st.caption('Apply commits the table and activates deteriorated RC. The shared analysis updates all response tabs automatically. Restore returns every module to healthy composite stiffness. Re-optimize calculates a fresh controlled layout in tab 5 without changing the active state.')
+        if fingerprint(st.session_state.exposure_draft)!=fingerprint(st.session_state.member_losses):st.warning('Exposure table has unapplied edits. Click APPLY AND COMPARE to activate them.')
+        st.dataframe(pd.DataFrame(m['audit']),hide_index=True,width='stretch')
+        if r:
+            hh=summary_metrics(healthy_m,r['healthy'],c);aa=summary_metrics(m,r['active'],c)
+            if 'nonlinear'in r['active']and'error'not in r['active']['nonlinear']and'nonlinear'in r['healthy']and'error'not in r['healthy']['nonlinear']:
+                hh['P-Delta roof X (mm)']=r['healthy']['nonlinear']['roof_mm'];aa['P-Delta roof X (mm)']=r['active']['nonlinear']['roof_mm']
+            table=[{'Metric':name,'HealthyRC':value,'ActiveRC':aa[name],'Change_percent':100*(aa[name]-value)/abs(value)if abs(value)>1e-12 else None}for name,value in hh.items()]
+            st.dataframe(pd.DataFrame(table),hide_index=True,width='stretch')
+            st.download_button('Download exposure comparison CSV',pd.DataFrame(table).to_csv(index=False),file_name='FrameLab_exposure_comparison.csv')
+        with st.expander('Section calculation details'):
+            e=st.number_input('Calculation member',1,len(m['el']),1,key='section_member')-1;row=m['audit'][e];p0=section(c);p=section(c,row['Ec_loss_pct']/100,row['As_loss_pct']/100)
+            st.latex(r'EA=E_{c0}(1-\ell_c)A_c+E_s A_s,\quad EI=E_{c0}(1-\ell_c)I_c+E_s I_s')
+            st.latex(r'A_s=(1-r)A_{s0},\quad I_s=2n[(1-r)^2 I_b+(1-r)A_bz^2],\quad z=h/2-a')
+            st.write(f"EA healthy = {p0['EA']:.8g} N; active = {p['EA']:.8g} N; ratio = {p['EA']/p0['EA']:.8f}. EI healthy = {p0['EI']:.8g} N m²; active = {p['EI']:.8g} N m²; ratio = {p['EI']/p0['EI']:.8f}.")
+            k,T,_,L=ref_elt(m,m['el'][e]);st.write('Local element stiffness k (mixed SI force/displacement units):');st.dataframe(pd.DataFrame(k),width='stretch')
+            st.caption(f"Shared effective-EI factor = {c.get('ei_factor',1.):g}; it multiplies the composite EI shown here in every module.")
+            st.caption('Gross concrete area excludes the original bar holes. Removed steel remains void. Bar-centre cover is surface-to-bar-centre distance, not clear cover.')
+            st.download_button('Download section and model audit JSON',json.dumps({'inputs':c,'sections':m['audit'],'healthy_section':p0,'selected_section':p},indent=2),file_name='FrameLab_section_audit.json')
+    with st.expander('Method, limits and official references'):
+        st.write('Static, dynamics and every diagnosis/design scenario are fresh OpenSees solves. Diagnosis grid search and greedy maximin sensor placement are FrameLab algorithms. Buckling is a separate reference matrix eigenproblem. Independent matrix checks compare solver implementations under the same assumptions.')
+        st.write('Online: up to 4 stories, 3 bays, 160 stability elements and 1500 time steps. Sensors are displacement/rotation channels; recommendations add horizontal-displacement sensors. No real sensor hardware connection, plasticity, cracking or time-dependent corrosion. Results may reset when the browser session closes or the hosting service sleeps.')
+        st.markdown('[OpenSees elastic beam-column](https://openseespydoc.readthedocs.io/en/latest/src/elasticBeamColumn.html) · [Corotational transformation](https://openseespydoc.readthedocs.io/en/latest/src/corotational.html) · [Source and MATLAB download](https://github.com/afroja29/FrameLab2D)')
 
 
 if __name__=='__main__':
