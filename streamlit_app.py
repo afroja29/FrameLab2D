@@ -12,7 +12,7 @@ os.environ.setdefault('MPICH_INTERFACE_HOSTNAME','127.0.0.1')
 os.environ.setdefault('HWLOC_COMPONENTS','-linux')
 
 # ---------- Independent matrix solver ----------
-"""Independent direct-stiffness and corotational calculations; no OpenSees calls."""
+
 import numpy as np
 from scipy.linalg import eigh, lu_factor, lu_solve
 
@@ -169,7 +169,7 @@ def ref_dynamics(m, mass, zeta, frequency, dt, duration, height, ncols):
         states.append(full)
     return (np.array(states), w1 / (2 * np.pi))
 # ---------- OpenSees structural solver ----------
-"""Live, parameter-driven OpenSees RC frame analysis. SI units internally."""
+
 import os
 os.environ.setdefault('OPENBLAS_NUM_THREADS','1')
 os.environ.setdefault('MPIR_CVAR_CH3_INTERFACE_HOSTNAME','127.0.0.1')
@@ -512,7 +512,7 @@ def main():
         force=pd.DataFrame(a['local_end_forces'],columns=['Ni_N','Vi_N','Mi_Nm','Nj_N','Vj_N','Mj_Nm']);force.insert(0,'Element',np.arange(1,len(force)+1));st.dataframe(force,hide_index=True,use_container_width=True)
         st.download_button('Download this run: inputs + actual results + checks (JSON)',json.dumps(r,indent=2),file_name=f"OpenSees_run_{r['run_id']}.json",mime='application/json')
         st.download_button('Download nodal results CSV',df.to_csv(index=False),file_name=f"OpenSees_nodes_{r['run_id']}.csv",mime='text/csv')
-    st.caption('Local live engineering app: fresh OpenSees solves on Run. Plot zoom, selected view and magnification do not change the analysis inputs. No MATLAB GUI run is implied.')
+    st.caption('Live engineering app: fresh OpenSees solves on Run. Plot zoom, selected view and magnification do not change the analysis inputs. No MATLAB GUI run is implied.')
 
 
 if __name__=='__main__':

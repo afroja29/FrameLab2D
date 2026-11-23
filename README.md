@@ -8,6 +8,12 @@ By Afroja Sultana
 >
 > No MATLAB, installation or account is needed for the browser edition. Choose **Load demo** and start exploring. All structural calculations run locally in your browser. The web release covers all seven analysis areas with the scope and limitations documented in [README_WEB.md](web/README_WEB.md).
 
+## Independent live OpenSees analysis
+
+[Open the live OpenSees app](https://framelab2d-opensees.streamlit.app/) · [Run guide](README_OPENSEES.md) · [Audience QR code](FrameLab2D_OpenSees_QR.png)
+
+No installation is needed for this hosted app. On a phone, open the sidebar, review the preset and click **RUN LIVE OPENSEES ANALYSIS**. It builds and solves an independent OpenSees model on the server for each Run. It covers static, modal, harmonic dynamic and corotational P-Delta analysis. Sensor diagnosis and placement remain in FrameLab; they are not reproduced in this OpenSees companion.
+
 ## Try it in one minute
 
 1. Open the live browser app and choose **Load demo**.
@@ -77,4 +83,5 @@ Static diagnosis and dynamics remain linear elastic. Newton-Raphson is used for 
 - `verifyFrameLab2D.m`: MATLAB numerical and app smoke checks.
 - `HandCalculation_Reference.csv`: section and cantilever hand-check reference.
 - `OpenSees_NR_Comparison.json` and `Adaptive_NR_Check.txt`: recorded independent numerical comparisons.
+
 
