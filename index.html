@@ -1,54 +1,12 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#101923">
-  <meta name="description" content="FrameLab 2D browser interface for exploring planar frame models and structural analysis workflows.">
-  <title>FrameLab 2D — Structural Analysis</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <div class="shell">
-    <aside class="sidebar">
-      <a class="brand" href="#"><span class="brand-mark">F</span><span>FrameLab <small>2D</small></span></a>
-      <div class="workspace-label">WORKSPACE</div>
-      <button class="project active"><span class="project-icon">⌂</span><span><b>Untitled frame</b><small>Planar frame · 2D</small></span><span class="dots">•••</span></button>
-      <div class="side-label">ANALYSIS</div>
-      <nav class="nav" aria-label="Analysis sections">
-        <button class="nav-item selected" data-tab="model"><span>▦</span> Frame model</button>
-        <button class="nav-item" data-tab="sensors"><span>⌁</span> Sensor network</button>
-        <button class="nav-item" data-tab="damage"><span>◉</span> Damage diagnosis</button>
-        <button class="nav-item" data-tab="dynamic"><span>〰</span> Dynamic simulation</button>
-        <button class="nav-item" data-tab="recommend"><span>✳</span> Sensor recommendation</button>
-        <button class="nav-item" data-tab="stability"><span>⌁</span> P-Delta & buckling</button>
-        <button class="nav-item" data-tab="exposure"><span>◈</span> Exposure scenarios</button>
-      </nav>
-      <div class="sidebar-bottom"><span class="avatar">AS</span><span><b>Afroja Sultana</b><small>FrameLab 2D</small></span><span class="dots">•••</span></div>
-    </aside>
-
-    <main class="main">
-      <header class="topbar"><div class="crumb">Projects <span>/</span> Untitled frame</div><div class="top-actions"><span class="saved"><i></i> All changes saved</span><button class="icon-btn" aria-label="Notifications">♧</button><button class="share" id="shareBtn">↗ &nbsp;Share</button></div></header>
-      <section class="page-heading"><div><div class="eyebrow">STRUCTURAL ANALYSIS <span>·</span> PROJECT 01</div><h1 id="sectionTitle">Frame model</h1><p>Configure a planar frame and explore its structural response.</p></div><div class="heading-actions"><button class="secondary" id="resetBtn">↺ &nbsp;Reset model</button><button class="primary" id="runBtn">▶ &nbsp;Run analysis</button></div></section>
-      <div class="notice"><span class="notice-icon">i</span><span><b>Browser preview</b> &nbsp;This web edition is a UI prototype. The MATLAB desktop app contains the full numerical solver; web calculations are not connected yet.</span><button aria-label="Dismiss" id="dismissNotice">×</button></div>
-      <div class="workspace">
-        <section class="canvas-card">
-          <div class="card-head"><div><b>Model view</b><small>Front elevation</small></div><div class="view-tools"><button class="tool active">⌖</button><button class="tool">＋</button><button class="tool">－</button><button class="tool">⛶</button></div></div>
-          <div class="canvas-wrap"><canvas id="frameCanvas" aria-label="Frame model visualization"></canvas><div class="canvas-badge"><i></i> 2D ELEVATION</div><div class="scale">5 m</div></div>
-          <div class="legend"><span><i class="legend-line"></i> Frame members</span><span><i class="legend-load">↓</i> Applied load</span><span><i class="legend-support">△</i> Fixed support</span></div>
-        </section>
-        <aside class="controls-card">
-          <div class="card-head"><div><b>Model settings</b><small>Geometry & material</small></div><button class="tool">⚙</button></div>
-          <div class="control-section"><div class="section-title">GEOMETRY</div><div class="fields two"><label>Stories<div class="stepper"><button data-adjust="stories" data-by="-1">−</button><input id="stories" type="number" min="1" max="8" value="3"><button data-adjust="stories" data-by="1">+</button></div></label><label>Bays<div class="stepper"><button data-adjust="bays" data-by="-1">−</button><input id="bays" type="number" min="1" max="8" value="3"><button data-adjust="bays" data-by="1">+</button></div></label></div><div class="fields two"><label>Bay width <div class="unit-input"><input id="bayWidth" type="number" value="6" min="1" step="0.5"><span>m</span></div></label><label>Story height <div class="unit-input"><input id="storyHeight" type="number" value="3.5" min="1" step="0.1"><span>m</span></div></label></div></div>
-          <div class="control-section"><div class="section-title">SECTION PROPERTIES</div><label>Elastic modulus <div class="unit-input"><input type="number" value="200" min="1"><span>GPa</span></div></label><div class="fields two"><label>Area<div class="unit-input"><input type="number" value="0.025" min="0.0001" step="0.001"><span>m²</span></div></label><label>Inertia<div class="unit-input"><input type="number" value="0.00012" min="0.000001" step="0.00001"><span>m⁴</span></div></label></div></div>
-          <div class="control-section"><div class="section-title">LOADING</div><label>Floor load <div class="unit-input"><input type="number" value="20" min="0"><span>kN</span></div></label><div class="toggle-row"><span>Show load arrows</span><button class="toggle on" aria-label="Toggle load arrows"><i></i></button></div></div>
-          <button class="wide-button" id="applyBtn">Update model <span>→</span></button>
-        </aside>
-      </div>
-      <section class="results-card"><div class="results-head"><div><b>Analysis overview</b><small id="resultSub">Run an analysis to see response summaries</small></div><div class="result-tabs"><button class="selected">Summary</button><button>Node response</button><button>Member forces</button></div></div><div class="metrics"><div class="metric"><span>STORIES</span><b id="storyMetric">3</b><small>model geometry</small></div><div class="metric"><span>BAYS</span><b id="bayMetric">3</b><small>model geometry</small></div><div class="metric"><span>MAX. DRIFT</span><b>—</b><small>run analysis</small></div><div class="metric"><span>MAX. DISPLACEMENT</span><b>—</b><small>run analysis</small></div><div class="metric"><span>MODEL STATUS</span><b class="status-ready">Ready</b><small>preview mode</small></div></div></section>
-      <footer><span>FrameLab 2D <span class="muted">·</span> Structural Analysis, Deterioration Assessment and Sensor Placement</span><span>By Afroja Sultana <span class="muted">·</span> Web preview</span></footer>
-    </main>
-  </div>
-  <script src="app.js"></script>
-</body>
-</html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FrameLab 2D | Download and Run</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}body{margin:0;font:17px/1.6 system-ui,-apple-system,sans-serif;color:#143047;background:#fff}header{background:#0a2238;color:white;padding:42px max(24px,calc((100vw - 1060px)/2))}h1{font-size:42px;line-height:1.1;margin:0 0 12px}header p{color:#83d9e7;margin:6px 0}main{max-width:1060px;margin:auto;padding:28px 24px}nav{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:34px}a{color:#075fa1}section{padding:14px 0 35px;border-bottom:1px solid #ccd8e3;margin-bottom:20px;scroll-margin-top:20px}h2{font-size:28px;margin:12px 0}.button{display:inline-block;border:1px solid #14659e;background:#14659e;color:#fff;text-decoration:none;border-radius:5px;padding:13px 20px;margin:7px 8px 7px 0;font-weight:650}.secondary{background:#fff;color:#14659e}.qr{width:170px;max-width:60vw;height:auto;display:block;margin:14px 0}code{background:#eff4f8;padding:4px 9px;border-radius:3px}li{margin:6px 0}.muted{color:#536575;font-size:15px}footer{margin:30px 0;font-size:15px}details{margin:18px 0}summary{cursor:pointer;font-weight:650} @media(max-width:600px){h1{font-size:34px}header{padding:30px 22px}.button{display:block;text-align:center;margin-right:0}main{padding:22px}h2{font-size:25px}}
+</style></head><body><header><h1>FrameLab 2D</h1><p>Structural Analysis, Deterioration Assessment and Sensor Placement</p><div>By Afroja Sultana</div></header><main>
+<nav><a href="#web">Run online</a><a href="#matlab">Download MATLAB GUI</a><a href="#opensees">OpenSees code</a><a href="https://github.com/afroja29/FrameLab2D">GitHub repository</a></nav>
+<section id="web"><h2>Run the full web app</h2><p>Change inputs and run the seven-tab workflow in your browser. OpenSees performs fresh structural analysis on the server. FrameLab code performs diagnosis, sensor placement and reference buckling calculations.</p><a class="button" href="https://framelab2d-opensees.streamlit.app/">OPEN LIVE FRAMELAB 2D</a><a class="button secondary" href="https://github.com/afroja29/FrameLab2D/blob/main/README_OPENSEES.md">Read the web guide</a><p>No MATLAB or Python installation is needed on your device. On a phone, expand the sidebar for inputs. Choose <strong>LOAD RC DEMO</strong>, then <strong>RUN LIVE OPENSEES ANALYSIS</strong>.</p><a href="FrameLab2D_Live_Web_QR.png"><img class="qr" src="FrameLab2D_Live_Web_QR.png" alt="QR code for the live seven-tab web app"></a><p class="muted">Live app: framelab2d-opensees.streamlit.app</p></section>
+<section id="matlab"><h2>Download and run in MATLAB</h2><a class="button" href="https://github.com/afroja29/FrameLab2D/raw/refs/heads/main/FrameLab2D_Full_Package.zip">DOWNLOAD MATLAB PACKAGE (.ZIP)</a><a class="button secondary" href="https://github.com/afroja29/FrameLab2D/raw/refs/heads/main/FrameLab2D.m">Download main .m file</a><ol><li>Extract the ZIP.</li><li>Open MATLAB and select the extracted <strong>FrameLab2D</strong> folder as Current Folder.</li><li>Type <code>FrameLab2D</code> in the Command Window, or open and run <code>START_FRAMELAB.m</code>.</li><li>Click <strong>LOAD RC DEMO</strong>, then <strong>RUN STATIC ANALYSIS</strong>.</li></ol><p>The main file is self-contained. Keep its filename <strong>FrameLab2D.m</strong>. Desktop MATLAB is required. Python and OpenSees are not needed for the MATLAB GUI.</p><p><a href="https://github.com/afroja29/FrameLab2D/blob/main/README_MATLAB.md">MATLAB guide and optional local checks</a></p><a href="FrameLab2D_MATLAB_Download_QR.png"><img class="qr" src="FrameLab2D_MATLAB_Download_QR.png" alt="QR code for the MATLAB download section"></a><p class="muted">MATLAB package updated November 23, 2026. Native MATLAB execution must be checked in your MATLAB installation.</p></section>
+<section id="opensees"><h2>Independent OpenSees source code</h2><p>Download the standalone Python solver used for the structural calculations. It builds its own frame and calculates static response, frequencies, dynamics and corotational P-Delta. It does not load MATLAB result values.</p><a class="button" href="https://github.com/afroja29/FrameLab2D/raw/refs/heads/main/FrameLab2D_OpenSees_Code.zip">DOWNLOAD OPENSEES CODE (.ZIP)</a><a class="button secondary" href="https://github.com/afroja29/FrameLab2D/blob/main/FrameLab2D_OpenSees.py">Read the solver .py file</a><p><a href="https://github.com/afroja29/FrameLab2D/blob/main/README_OPENSEES_CODE.md">Installation and run instructions</a></p></section>
+<details><summary>Existing JavaScript browser edition</summary><p><a href="web/">Open the existing offline-capable browser edition</a>. This edition calculates locally in JavaScript and does not use OpenSees. The primary live OpenSees app is linked above.</p></details>
+<details><summary>Methods and limits</summary><p>Seven areas: frame analysis, sensor network, damage diagnosis, dynamics, sensor placement, P-Delta/reference buckling and exposure scenarios. Every response uses the active healthy or deteriorated stiffness. Exposure losses are assumptions. The live app supports up to 4 stories and 3 bays. The model omits yielding, cracking, bond slip and corrosion progression. Sensor scores and buckling factors use custom calculations around structural responses.</p></details>
+<footer>FrameLab 2D · Afroja Sultana · <a href="https://github.com/afroja29/FrameLab2D">Source, guides and downloads on GitHub</a></footer>
+</main></body></html>

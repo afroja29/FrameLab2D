@@ -1,14 +1,15 @@
-# FrameLab 2D audience demo
+# Audience access
 
-Open https://afroja29.github.io/FrameLab2D/web/ in a modern browser. No MATLAB, installation or account is required.
+MATLAB download: https://afroja29.github.io/FrameLab2D/#matlab
+QR: FrameLab2D_MATLAB_Download_QR.png
 
-1. Choose **Load demo**. The default roof displacement is approximately 33.2056 mm.
-2. Open **Damage diagnosis**, choose **Simulate data**, then **Run diagnosis**.
-3. Open **Sensor placement**, choose **Optimize placement** to see proposed sensor locations.
-4. Open **Deterioration**, choose **RC 400 mm preset**, **Assign to group**, then **Apply and compare** for healthy/deteriorated RC results.
+Full live web app: https://framelab2d-opensees.streamlit.app/
+QR: FrameLab2D_Live_Web_QR.png
 
-GUI and methods guide: https://afroja29.github.io/FrameLab2D/web/readme.html
+## MATLAB
+Download the ZIP, extract it, open the FrameLab2D folder in MATLAB, enter FrameLab2D. Or run START_FRAMELAB.m. Click LOAD RC DEMO, then RUN STATIC ANALYSIS.
 
-Use FrameLab2D_Web_QR.png for the working analysis GUI. The root homepage is a separate interface prototype.
+## Web
+Click LOAD RC DEMO, then RUN LIVE OPENSEES ANALYSIS. Use tab 3 to simulate and diagnose, tab 5 for placement, and tab 7 to apply deterioration and re-optimize. Phones need only a browser.
 
-Test on a phone and another computer at least 24 hours before presenting. Keep an offline web folder and a short screen recording as backups.
+The MATLAB QR opens download instructions and requires MATLAB to execute. The web QR opens the actual server app.

@@ -1,0 +1,29 @@
+{
+  "matlab_runtime_executed": false,
+  "syntax_parser": "MISS_HIT 0.9.44 --no-style",
+  "syntax_passed": true,
+  "files": [
+    {
+      "file": "FrameLab2D.m",
+      "sha256": "1b01c8e058366210c92762efee79c9cc701b4b2b794f669e192338638e91e9e3"
+    },
+    {
+      "file": "START_FRAMELAB.m",
+      "sha256": "d14e1027f5b0f12f41be728aff35ac8f3c13b0532b83aff5b18be50b0b68965a"
+    },
+    {
+      "file": "verifyFrameLab2D.m",
+      "sha256": "cb68cb4e8fb3cbd4cb38cf550fbaf7bbafa2b09cd8f7a8e298602bd21e9bde0c"
+    },
+    {
+      "file": "verifyFrameLab2DExport.m",
+      "sha256": "653998f92f4f6206f9aa245ec1e895de2aa8e6f1eab0b6f427686a6632e34678"
+    }
+  ],
+  "scope": "Current MATLAB source and helpers syntax checked; native MATLAB GUI and numerical execution not available in the preparation environment.",
+  "updates": [
+    "Latest connected MATLAB version recovered from the project source",
+    "Demo gravity multiplier set to 5",
+    "Verification helper uses current labels and connected-workflow checks"
+  ]
+}

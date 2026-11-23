@@ -1,89 +1,91 @@
 # FrameLab 2D
 
-**Structural Analysis, Deterioration Assessment and Sensor Placement**
-
+**Structural Analysis, Deterioration Assessment and Sensor Placement**  
 By Afroja Sultana
 
-> **Browser version:** [Open FrameLab 2D](https://afroja29.github.io/FrameLab2D/web/) · [Read the web guide](https://afroja29.github.io/FrameLab2D/web/readme.html)
->
-> No MATLAB, installation or account is needed for the browser edition. Choose **Load demo** and start exploring. All structural calculations run locally in your browser. The web release covers all seven analysis areas with the scope and limitations documented in [README_WEB.md](web/README_WEB.md).
+## Start here
 
-## Connected seven-tab Streamlit app with OpenSees
+**[Download hub and web access](https://afroja29.github.io/FrameLab2D/)**
 
-[Open the live OpenSees app](https://framelab2d-opensees.streamlit.app/) · [Run guide](README_OPENSEES.md) · [Audience QR code](FrameLab2D_OpenSees_QR.png)
+| Version | Open / download | Requirements |
+|---|---|---|
+| MATLAB GUI | [Complete MATLAB ZIP](https://github.com/afroja29/FrameLab2D/raw/refs/heads/main/FrameLab2D_Full_Package.zip) · [Main .m file](FrameLab2D.m) · [Run guide](README_MATLAB.md) | Desktop MATLAB |
+| Full live web app, seven tabs | **[Run FrameLab 2D online](https://framelab2d-opensees.streamlit.app/)** · [Source and launcher ZIP](FrameLab2D_Streamlit_Full.zip) · [Web guide](README_OPENSEES.md) | Browser, no installation |
+| Independent OpenSees solver code | [FrameLab2D_OpenSees.py](FrameLab2D_OpenSees.py) · [Solver ZIP](FrameLab2D_OpenSees_Code.zip) · [Instructions](README_OPENSEES_CODE.md) | Python 3.12 + OpenSeesPy, NumPy, SciPy |
+| Existing JavaScript browser edition | [Open browser edition](https://afroja29.github.io/FrameLab2D/web/) · [Guide](web/README_WEB.md) | Browser, calculations execute locally in JavaScript |
 
-No installation is needed for this hosted app. On a phone, open the sidebar, review the preset and click **RUN LIVE OPENSEES ANALYSIS**. It builds and solves an independent OpenSees model on the server for each Run. All seven modules are connected: frame analysis, sensor network, damage diagnosis, dynamics, greedy sensor placement, P-Delta/reference buckling and exposure comparison with re-optimization. Structural trial responses use OpenSees; diagnosis, placement and reference buckling are FrameLab algorithms around those responses. The initial active state is Healthy RC. Apply a member-loss table in tab 7 to activate deteriorated RC.
+The MATLAB source and package were synchronized to the latest connected version on **November 23, 2026**. The MATLAB demo now uses gravity multiplier **5** to match the verification example. MATLAB and OpenSees use separate structural solvers. The JavaScript browser edition uses its own local solver.
 
-Download the complete Streamlit source and launcher: [FrameLab2D_Streamlit_Full.zip](FrameLab2D_Streamlit_Full.zip). The existing OpenSees QR still opens this updated app.
+## MATLAB
 
-## Try it in one minute
-
-1. Open the live browser app and choose **Load demo**.
-2. Open **Damage diagnosis**, choose **Simulate data**, then **Run diagnosis**.
-3. Open **Sensor placement** and choose **Optimize placement**.
-4. For the RC example, choose **Deterioration**, then **RC 400 mm preset**, **Assign to group**, and **Apply and compare**.
-
-Use `web/FrameLab2D_Web_QR.png` for direct audience access. `FrameLab2D_QR.png` links to the source repository. The MATLAB files and original MATLAB ZIP remain available below.
-
-## Start the MATLAB app
-
-1. Extract the ZIP. You can keep the extracted `FrameLab2D` folder in OneDrive.
-2. Open MATLAB and select that folder as the Current Folder.
-3. Type this in the MATLAB Command Window:
+1. Download and extract **FrameLab2D_Full_Package.zip**.
+2. In MATLAB, select the extracted **FrameLab2D** folder as Current Folder.
+3. Enter:
 
 ```matlab
 FrameLab2D
 ```
 
-The main file and class are both named `FrameLab2D`. MATLAB identifiers cannot contain spaces. The displayed app title is **FrameLab 2D**. This is a self-contained MATLAB UI app; the main file contains its calculation helpers. Use desktop MATLAB with support for AppBase, uifigure, uigridlayout and uitable. No external mesh or input file is needed for the default example. This package does not contain a MATLAB installer or a standalone executable.
+Or open and run `START_FRAMELAB.m`. The main class and filename must stay **FrameLab2D**. The main `.m` file contains the calculation helpers. No Python or OpenSees installation is required for this MATLAB GUI.
 
-## Workflow and features
+Click **LOAD RC DEMO**, then **RUN STATIC ANALYSIS**. The healthy RC mean roof X is approximately **8.6465 mm**. The demo has 2 stories, 2 bays, 6 m spans, 3.5 m story height and fixed bases. It uses a 400 × 400 mm uncracked RC rectangle with Ec 30 GPa, Es 200 GPa, two 16 mm bars per opposite face and 50 mm bar-centre cover. A 100 kN total lateral roof force is distributed equally among roof nodes. Gravity is 1000 kN/floor × multiplier 5, with four segments/member and EI factor 1.
 
-- **2D Frame Model:** define the planar frame, sections and loads; calculate the linear elastic response. Nodes have horizontal translation, vertical translation and in-plane rotation. Fixed base supports restrain all three DOFs and are shown with base plates and hatch lines.
-- **Sensor Network:** view and edit sensors in the front plane. The sensor adequacy check reports sensitivity rank and unresolved parameter combinations. Limited rank can still permit a useful single-member diagnosis.
-- **Damage Diagnosis:** simulate measurements and compare candidate single-member stiffness losses. The fitted frame and the trial bar chart have separate plot tabs. Candidate bar values are separate hypotheses, not simultaneous damage in every member.
-- **Dynamic Simulation:** inspect the linear elastic dynamic response.
-- **Sensor Recommendation:** compare candidate sensor locations and show suggested sensors in front view.
-- **P-Delta & Buckling:** solve geometric nonlinear elastic equilibrium using a corotational element and full Newton-Raphson with adaptive load steps and backtracking. Inspect convergence and tangent stiffness. The reported eigenbuckling factor is a reference linearized result, not a nonlinear collapse load.
-- **Exposure scenarios:** assign assumed concrete modulus and reinforcement area losses by member or group, compare healthy RC with deteriorated RC, and inspect/export the section calculations and hand-check matrices.
-
-## Exposure demonstration
-
-1. Select **RC 400 mm PRESET** before assigning losses. This sets a valid 400 x 400 mm RC example; the general frame defaults are not that RC section.
-2. Choose members or a group. Enter, for example, concrete E loss = 10% and steel area loss = 20%, then choose **ASSIGN TO GROUP**.
-3. Choose **APPLY AND COMPARE**. Read **Section calculations** for EA/EI ratios and **Response and hand check** for response comparisons.
-4. Use **HAND CHECK** for formulas and element matrices. Use **COMPARE P-DELTA** for the geometric nonlinear comparison. **RESTORE ORIGINAL** returns to the original frame properties.
-
-Exposure labels describe the scenario. They do not automatically predict corrosion or determine loss percentages. With zero loss inputs, the healthy and deteriorated RC models have the same stiffness. Loss percentages are user assumptions, not field measurements or exposure-to-time predictions.
-
-The section model assumes rectangular, uncracked concrete, perfect bond and symmetric top/bottom reinforcement. Removed steel remains a void; the steel elastic modulus is constant. Bar-centre cover is the distance from the concrete surface to the bar centre, not clear cover. Valid reinforcement geometry must fit inside the section.
-
-## Hand calculation and verification
-
-`HandCalculation_Reference.csv` contains an independent reference for a 400 mm square section with Ec = 30 GPa, Es = 200 GPa, two 16 mm bars per face and 50 mm bar-centre cover. With 10% concrete modulus loss and 20% steel area loss, the EA ratio is about 0.896742 and the EI ratio about 0.894595. Its cantilever tip values are a separate hand-check example, not the default frame response.
-
-In MATLAB, run the numerical checks without opening the UI:
+Optional MATLAB checks:
 
 ```matlab
+FrameLab2D.verifyConnectedWorkflow
 FrameLab2D.verifyNewtonRaphson
 FrameLab2D.verifyEnvironment
-```
-
-For the full app smoke check, which opens and closes a temporary app:
-
-```matlab
 verifyFrameLab2D
 ```
 
-The supplied MATLAB source was syntax-checked, but the MATLAB runtime and GUI were not available in the preparation environment. The included MATLAB checks must be run in MATLAB to confirm local execution. The Newton-Raphson formulation was independently implemented in Python and compared with OpenSees 3.8.0 on seven cases; the maximum relative displacement difference was approximately 1.82e-9. These comparisons verify the independent formulation, not execution of the MATLAB file. Details are in `OpenSees_NR_Comparison.json` and `Adaptive_NR_Check.txt`.
+`verifyFrameLab2D` opens a temporary GUI, checks current callbacks and closes it. The preparation environment did not have MATLAB, so native MATLAB execution is not claimed. Syntax checks and independent numerical tests are documented separately. See [README_MATLAB.md](README_MATLAB.md).
 
-Static diagnosis and dynamics remain linear elastic. Newton-Raphson is used for geometric nonlinear equilibrium in the stability module. Material plasticity, concrete cracking/crushing, bond deterioration and corrosion progression are not simulated.
+## Live web app
 
-## Files
+Open **https://framelab2d-opensees.streamlit.app/**. On a phone, expand the sidebar for shared inputs and scroll the tab strip to see every module.
 
-- `FrameLab2D.m`: main app and solver helpers.
-- `verifyFrameLab2D.m`: MATLAB numerical and app smoke checks.
-- `HandCalculation_Reference.csv`: section and cantilever hand-check reference.
-- `OpenSees_NR_Comparison.json` and `Adaptive_NR_Check.txt`: recorded independent numerical comparisons.
+1. Choose **LOAD RC DEMO**, then **RUN LIVE OPENSEES ANALYSIS**.
+2. In tab 3, choose **SIMULATE DATA**, then **RUN DIAGNOSIS**.
+3. In tab 5, choose **OPTIMIZE SENSOR LOCATIONS**.
+4. In tab 7, assign assumed losses and choose **APPLY AND COMPARE**. The active state changes to deteriorated RC and the response analysis runs again.
+5. Choose **RE-OPTIMIZE SENSORS**, then inspect tab 5. It compares healthy and active layouts under the same trial scenarios, absolute noise and sensor budget.
+6. **RESTORE HEALTHY RC** restores the healthy composite model for all modules.
 
+OpenSees builds and solves a fresh structural model for each Run. Every diagnosis/design trial uses OpenSees structural responses. FrameLab's custom code performs the diagnosis grid search, greedy sensor placement and reference buckling eigenproblem. Those are not native OpenSees features. Animation Play replays the newly calculated time history. The MATLAB screenshot column is a recorded reference and not a fresh MATLAB solve.
 
+## Seven connected modules
+
+1. **Frame model:** static response, drift, compliance, deformation and force diagrams.
+2. **Sensor network:** add/remove measurement channels and inspect sensitivity rank/limitations.
+3. **Damage diagnosis:** simulate readings, audit noise, scan additional single-member EA/EI loss and rank candidates.
+4. **Dynamics:** frequencies, harmonic-force histories and animation.
+5. **Sensor placement:** greedy scenario separation, healthy/active layout comparison and recommendation scores.
+6. **P-Delta and buckling:** geometric nonlinear equilibrium, reference elastic eigenvalue and optional mesh comparison.
+7. **Exposure scenarios:** member/group losses, section EA/EI calculations, healthy/deteriorated comparison, restore and sensor re-optimization.
+
+All response modules use the active stiffness model. Exposure percentages are assumptions, not losses predicted from a label. Green diamonds mark healthy recommendations, orange stars mark active recommendations, and blue circles mark existing channels. Uniform deterioration may change scores without changing node choices. Diagnosis estimates an additional loss relative to the active baseline. Noise can affect the estimated loss; set both channel and extra simulation noise to zero for an exact 30% grid-search recovery test.
+
+## Audience links and QR codes
+
+| Use | Link | QR image |
+|---|---|---|
+| Download MATLAB code | [MATLAB download hub](https://afroja29.github.io/FrameLab2D/#matlab) | [FrameLab2D_MATLAB_Download_QR.png](FrameLab2D_MATLAB_Download_QR.png) |
+| Run the full live app | [Live web app](https://framelab2d-opensees.streamlit.app/) | [FrameLab2D_Live_Web_QR.png](FrameLab2D_Live_Web_QR.png) |
+
+The MATLAB QR opens the download page; MATLAB desktop is needed to execute `.m` files. The live-web QR works through a browser without MATLAB/Python installation on the viewer's device. The earlier `FrameLab2D_OpenSees_QR.png` continues to open the same live app. Existing JavaScript web QR images still point to that separate edition.
+
+## Verification and limits
+
+For the matching 2-story/2-bay example:
+
+| Result | Healthy RC | All-member 10% Ec + 10% steel-area loss |
+|---|---:|---:|
+| Mean static roof X, mm | 8.646462936 | 9.607217788 |
+| First frequency, Hz | 1.731469718 | 1.642613260 |
+| Dynamic roof peak, mm | 22.699651345 | 28.497863724 |
+| P-Delta mean roof X, mm | 9.508357682 | 10.683670747 |
+
+OpenSees version 3.8.0 calculated these values independently. Full standalone inputs, vectors and checks are in the solver ZIP. The web app's independent matrix checks run again with user inputs. Sensor-design and rank values are custom post-processing of response trials. A numerical match checks implementations under shared assumptions and is not a structural capacity validation.
+
+The live web app has interactive limits of 4 stories, 3 bays, 160 stability elements and 1500 time steps. The model is planar and elastic. There is no material plasticity, concrete cracking/crushing, bond-slip, time-dependent corrosion or real sensor-hardware connection. Reference elastic buckling is not nonlinear collapse capacity. See each version's guide for its exact scope.

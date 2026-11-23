@@ -1,5 +1,9 @@
-% FrameLab 2D - planar frame analysis, damage studies and sensor placement.
+% FrameLab 2D connected RC workflow, release 8.
+% MATLAB runtime validation is required; see README and verifyFrameLab2D.
+% Public distribution updated 23 November 2026.
 % Run as FrameLab2D from the folder containing FrameLab2D.m.
+% Web app: https://framelab2d-opensees.streamlit.app/
+% Source and downloads: https://github.com/afroja29/FrameLab2D
 % Static identification and dynamics remain linear elastic. Stability equilibrium
 % uses an analytic corotational element and full Newton-Raphson with load stepping
 % and backtracking; no plasticity, nonlinear concrete or arc-length postbuckling.
@@ -113,6 +117,19 @@ classdef FrameLab2D < matlab.apps.AppBase
 
     properties (Access = private)
         Model
+        BaselineMode
+        StateLabel
+        ModelInputDirty logical = false
+        ModelRevision double = 0
+        DynamicRevision double = 0
+        MeasurementAudit
+        MeasurementSettings
+        DynamicResult
+        RecommendationComparison
+        RecommendationMode
+        ComparisonNoise
+        ComparisonLoss
+        ComparisonMetrics
         AnalysisResult
         ExistingSensors double = zeros(0,3)
         Measurements double = zeros(0,1)
@@ -158,6 +175,260 @@ classdef FrameLab2D < matlab.apps.AppBase
     end
 
     methods (Access = private)
+        function createConnectedControls(app)
+            % Shared model status, controlled comparison and audit controls.
+            app.DesignGridLayout1.RowHeight={92,'1x'};
+            app.DesignGridLayout3.RowHeight={36,28,0};
+            app.StateLabel=uilabel(app.DesignGridLayout3,'Tag','ActiveModelState','FontColor',[.95 .88 .55],'WordWrap','on');
+            app.StateLabel.Layout.Row=3; app.StateLabel.Layout.Column=[1 2];
+            app.StateLabel.Visible='off'; % Keep state checks, hide the header status line.
+            app.DesignGridLayout13.RowHeight={220,46,'1x'};
+            app.DesignGridLayout19.RowHeight={28,28,28,28,26,28};
+            app.DesignGridLayout19.Padding=[4 4 4 4];app.DesignGridLayout19.RowSpacing=4;
+            app.DesignLabel34.Text='RC mode: E = concrete Ec; A and I describe the gross rectangle.'; app.DesignLabel34.WordWrap='on';
+            label=uilabel(app.DesignGridLayout19,'Text','Baseline'); label.Layout.Row=6; label.Layout.Column=1;
+            app.BaselineMode=uidropdown(app.DesignGridLayout19,'Tag','BaselineMode', ...
+                'Items',{'Healthy RC composite','Elastic EA/EI'},'Value','Healthy RC composite');
+            app.BaselineMode.Layout.Row=6; app.BaselineMode.Layout.Column=[2 4];
+            app.DesignGridLayout20.ColumnWidth={'1x','1x','1x','1x'};
+            demo=uibutton(app.DesignGridLayout20,'Text','LOAD RC DEMO','Tag','ConnectedRCDemo', ...
+                'ButtonPushedFcn',@(~,~)app.loadConnectedDemo()); demo.Layout.Row=1; demo.Layout.Column=4;
+            app.DesignGridLayout18.RowHeight={120,'1x',80};
+            app.DesignGridLayout18.ColumnWidth={'1x',480};
+            delete(app.DesignGridLayout25.Children);
+            app.DesignGridLayout25.ColumnWidth={100,155,100,100,110,'1x'};
+            app.DesignGridLayout25.RowHeight={28,28,32}; app.DesignGridLayout25.Padding=[2 2 2 2];
+            g=app.DesignGridLayout25;
+            lab=uilabel(g,'Text','Scenario mode');lab.Layout.Row=1;lab.Layout.Column=1;
+            app.RecommendationMode=uidropdown(g,'Tag','RecommendationMode', ...
+                'Items',{'Diagnosis scenarios','Healthy vs deteriorated RC'}, ...
+                'ValueChangedFcn',@(~,~)app.clearRecommendation());
+            app.RecommendationMode.Layout.Row=1;app.RecommendationMode.Layout.Column=[2 3];
+            lab=uilabel(g,'Text','New sensors');lab.Layout.Row=1;lab.Layout.Column=4;
+            app.NumberSensorsField=uieditfield(g,'numeric','Value',2,'Limits',[1 20],'RoundFractionalValues','on', ...
+                'ValueChangedFcn',@(~,~)app.clearRecommendation());
+            app.NumberSensorsField.Layout.Row=1;app.NumberSensorsField.Layout.Column=5;
+            app.DesignButton55=uibutton(g,'Text','OPTIMIZE SENSOR LOCATIONS');
+            app.DesignButton55.Layout.Row=1;app.DesignButton55.Layout.Column=6;
+            lab=uilabel(g,'Text','Comparison sigma X (mm)');lab.Layout.Row=2;lab.Layout.Column=[1 2];
+            app.ComparisonNoise=uieditfield(g,'numeric','Tag','ComparisonNoise','Value',.1,'Limits',[1e-6 Inf], ...
+                'ValueChangedFcn',@(~,~)app.clearRecommendation());
+            app.ComparisonNoise.Layout.Row=2;app.ComparisonNoise.Layout.Column=3;
+            lab=uilabel(g,'Text','Additional loss (%)');lab.Layout.Row=2;lab.Layout.Column=[4 5];
+            app.ComparisonLoss=uieditfield(g,'numeric','Tag','ComparisonLoss','Value',30,'Limits',[1 80], ...
+                'ValueChangedFcn',@(~,~)app.clearRecommendation());
+            app.ComparisonLoss.Layout.Row=2;app.ComparisonLoss.Layout.Column=6;
+            b=uibutton(g,'Text','COMPARE RC LAYOUTS','ButtonPushedFcn',@(~,~)app.compareSensorsAfterExposure());
+            b.Layout.Row=3;b.Layout.Column=[1 2];
+            b=uibutton(g,'Text','EXPORT VERIFICATION DATA','ButtonPushedFcn',@(~,~)app.exportVerification());
+            b.Layout.Row=3;b.Layout.Column=[3 4];
+            lab=uilabel(g,'Text','Comparison: fixed X-noise; same member trials and budget.', 'WordWrap','on');
+            lab.Layout.Row=3;lab.Layout.Column=[5 6];
+            app.RecommendationTable.Parent=app.DesignGridLayout18;
+            panel=uigridlayout(app.DesignGridLayout18,[2 1]); panel.Layout.Row=2; panel.Layout.Column=2;
+            panel.RowHeight={'1x','1x'};
+            app.RecommendationTable.Parent=panel;app.RecommendationTable.Layout.Row=1;app.RecommendationTable.Layout.Column=1;
+            app.ComparisonMetrics=uitable(panel,'Tag','SensorComparisonMetrics','RowName',[]);
+            app.ComparisonMetrics.Layout.Row=2;
+            app.RecommendationStatus.WordWrap='on'; app.DiagnosisStatus.WordWrap='on';app.DynamicStatus.WordWrap='on';
+            app.DesignGridLayout15.RowHeight={100,'1x',62,34};
+            b=uibutton(app.DesignGridLayout15,'Text','EXPORT VERIFICATION DATA', ...
+                'ButtonPushedFcn',@(~,~)app.exportVerification()); b.Layout.Row=4;b.Layout.Column=[1 2];
+            % All input changes invalidate exactly the dependent results.
+            for field={app.StoriesField,app.BaysField,app.BayWidthField,app.StoryHeightField,app.EField,app.AField,app.IField,app.LoadField,app.BaselineMode}
+                field{1}.ValueChangedFcn=@(~,~)app.modelInputChanged();
+            end
+            app.HiddenElementField.ValueChangedFcn=@(~,~)app.clearInferenceState();
+            app.SimulationNoiseField.ValueChangedFcn=@(~,~)app.clearInferenceState();
+            for field={app.FloorMassField,app.DampingField,app.ExcitationFrequencyField,app.DurationField,app.TimeStepField}
+                field{1}.ValueChangedFcn=@(~,~)app.clearDynamic();
+            end
+            for field={app.GravityField,app.GravityFactorField,app.StiffnessField,app.MeshField}
+                field{1}.ValueChangedFcn=@(~,~)app.clearStability();
+            end
+            app.DesignButton36.Tooltip='Restore front view without changing the analytical model.';
+        end
+
+        function loadConnectedDemo(app)
+            app.BaselineMode.Value='Healthy RC composite';
+            app.StoriesField.Value=2; app.BaysField.Value=2;
+            app.BayWidthField.Value=6; app.StoryHeightField.Value=3.5;
+            app.EField.Value=30; app.AField.Value=.16; app.IField.Value=.4^4/12;
+            app.LoadField.Value=100; app.GravityField.Value=1000; app.GravityFactorField.Value=5;
+            app.StiffnessField.Value=1; app.MeshField.Value=4;
+            app.SensorNoiseField.Value=1; app.SimulationNoiseField.Value=0;
+            app.NumberSensorsField.Value=2; app.ComparisonNoise.Value=.1; app.ComparisonLoss.Value=30;
+            app.DamageSlider.Value=30; app.DamageValueLabel.Text='30% stiffness loss';
+            app.FloorMassField.Value=80;app.DampingField.Value=5;app.ExcitationFrequencyField.Value=1.2;
+            app.DurationField.Value=6;app.TimeStepField.Value=.02;
+            app.generateModel();
+        end
+
+        function o=sectionOptions(app)
+            o=struct('Es',app.EnvEs.Value*1e9,'nFace',app.EnvBars.Value, ...
+                'd',app.EnvDiameter.Value/1000,'a',app.EnvCover.Value/1000);
+        end
+
+        function label=activeName(app)
+            if isempty(app.EnvHealthy)
+                label='Healthy elastic EA/EI';
+            elseif app.EnvApplied && ~isempty(app.EnvReport) && any(app.EnvReport.EA_ratio<1-1e-12 | app.EnvReport.EI_ratio<1-1e-12)
+                label='Deteriorated RC';
+            else
+                label='Healthy RC composite';
+            end
+        end
+
+        function updateStateBanner(app)
+            if app.ModelInputDirty
+                app.StateLabel.Text='MODEL INPUTS NOT APPLIED: correct the inputs or load the RC demo.';
+            elseif app.EnvDirty
+                app.StateLabel.Text=sprintf('MODEL v%d | EXPOSURE EDITS PENDING: apply before using dependent results.',app.ModelRevision);
+            else
+                app.StateLabel.Text=sprintf('MODEL v%d | %s | Shared stiffness for static, diagnosis, dynamics, stability and placement.', ...
+                    app.ModelRevision,app.activeName());
+            end
+        end
+
+        function requireActive(app)
+            assert(~isempty(app.Model),'Build a frame first.');
+            assert(~app.ModelInputDirty,'Model inputs are invalid or unapplied. Correct them or click LOAD RC DEMO.');
+            assert(~app.EnvDirty,'Exposure edits are pending. Click APPLY AND COMPARE or RESTORE HEALTHY RC.');
+        end
+
+        function clearRecommendation(app)
+            app.Recommendation=[]; app.RecommendationComparison=[];
+            app.RecommendationTable.Data=table();app.ComparisonMetrics.Data=table();
+            cla(app.RecommendationAxes,'reset');
+            app.RecommendationStatus.Text='Recommendation settings changed. Optimize or compare again.';
+        end
+
+        function clearDynamic(app)
+            app.StopRequested=true; app.DynamicRevision=app.DynamicRevision+1; app.DynamicResult=[];
+            cla(app.DynamicAxes,'reset');cla(app.TimeHistoryAxes,'reset');
+            app.DynamicStatus.Text='Model or dynamic inputs changed. Run a new simulation.';
+        end
+
+        function clearStability(app)
+            app.StabilityResult=[];app.EnvStabilitySettings=[];
+            app.StabilityTable.Data=table();cla(app.StabilityAxes,'reset');cla(app.StabilityCurveAxes,'reset');
+            if ~isempty(app.EnvResponse) && height(app.EnvResponse)>3
+                app.EnvResponse=app.EnvResponse(1:3,:); app.EnvComparison.Data=app.EnvResponse;
+            end
+            app.StabilityStatus.Value={'Stability inputs changed. Run P-Delta again.'};
+        end
+
+        function compareSensorsAfterExposure(app)
+            try
+                app.requireActive();
+                assert(~isempty(app.EnvHealthy),'Select the RC demo to compare healthy and deteriorated RC.');
+                app.clearRecommendation();
+                app.RecommendationMode.Value='Healthy vs deteriorated RC';
+                dofs=sdt_sensorDOFs(app.ExistingSensors(:,1:2));
+                comparison=sdt_compareSensorLayouts(app.EnvHealthy,app.Model,dofs, ...
+                    round(app.NumberSensorsField.Value),app.ComparisonNoise.Value/1000,app.ComparisonLoss.Value/100);
+                comparison.ModelRevision=app.ModelRevision;
+                app.RecommendationComparison=comparison;
+                app.RecommendationTable.Data=comparison.Layout(:,[1 2 3 6 7 8]);
+                app.RecommendationTable.ColumnName={'Pick','Healthy node','Active node','Pick changed?','Healthy score','Active score'};
+                app.ComparisonMetrics.Data=comparison.Metrics;
+                app.ComparisonMetrics.ColumnName=comparison.Metrics.Properties.VariableNames;
+                severity=1-app.EnvReport.EI_ratio;
+                app.plotStructure(app.RecommendationAxes,app.AnalysisResult,comparison.ExistingX,comparison.Deteriorated.DOFs,severity,true);
+                ax=app.RecommendationAxes;hold(ax,'on');
+                hnodes=comparison.Healthy.Nodes;
+                scatter(ax,app.Model.Nodes(hnodes,2),app.Model.Nodes(hnodes,3),160,[.12 .62 .32], ...
+                    'd','LineWidth',1.6,'DisplayName','Healthy recommended');
+                legend(ax,'show','Location','best');hold(ax,'off');
+                if comparison.LayoutSetChanged
+                    changeText='Recommended locations changed';
+                elseif comparison.OrderChanged
+                    changeText='Same locations; selection order changed';
+                else
+                    changeText='Locations unchanged; scores can still change';
+                end
+                if comparison.NewLayoutOnDeteriorated<1, quality='Weak minimum separation (<1 sigma).'; else, quality='Score is separation, not probability.'; end
+                app.RecommendationStatus.Text=sprintf(['%s | old layout on deteriorated RC %.4g; new layout %.4g. %s ' ...
+                    'Same %d scenarios, budget and fixed sigma; X channels only.'],changeText,comparison.OldLayoutOnDeteriorated, ...
+                    comparison.NewLayoutOnDeteriorated,quality,comparison.ScenarioCount);
+                app.TabGroup.SelectedTab=app.DesignTab9;
+            catch ME, app.showError(ME); end
+        end
+
+        function exportVerification(app)
+            try
+                app.requireActive();
+                folder=uigetdir(pwd,'Choose folder for exact verification data');
+                if isequal(folder,0),return;end
+                snapshot=struct('Version','FrameLab2D connected release 8','ModelRevision',app.ModelRevision, ...
+                    'ActiveState',app.activeName(),'ActiveModel',app.Model,'HealthyRCModel',app.EnvHealthy, ...
+                    'GrossReference',app.EnvOriginal,'SectionOptions',app.sectionOptions(), ...
+                    'ExposureRows',{app.EnvMembers.Data},'StaticResult',app.AnalysisResult, ...
+                    'Sensors',app.ExistingSensors,'Measurements',app.MeasurementAudit, ...
+                    'MeasurementSettings',app.MeasurementSettings,'Diagnosis',app.Diagnosis, ...
+                    'Recommendation',app.Recommendation,'SensorComparison',app.RecommendationComparison, ...
+                    'Dynamics',app.DynamicResult,'Stability',app.StabilityResult);
+                [~,base]=fileparts(tempname(folder)); folder=fullfile(folder,['FrameLab2D_audit_' base]);
+                [ok,msg]=mkdir(folder); assert(ok,msg);
+                save(fullfile(folder,'Verification_snapshot.mat'),'snapshot');
+                if ~isempty(app.MeasurementAudit)
+                    writetable(app.MeasurementAudit,fullfile(folder,'Measurements_exact.csv'));
+                end
+                if ~isempty(app.Diagnosis)
+                    writetable(app.Diagnosis.Scan,fullfile(folder,'All_diagnosis_trials.csv'));
+                    writetable(array2table(app.Diagnosis.Candidates,'VariableNames',{'Element','Loss','Objective','RMSE'}), ...
+                        fullfile(folder,'Diagnosis_candidates.csv'));
+                    dofs=sdt_sensorDOFs(app.ExistingSensors(:,1:2));nr=size(app.Diagnosis.Candidates,1);
+                    pred=zeros(nr*numel(dofs),8);row=0;
+                    for k=1:nr
+                        c=app.Diagnosis.Candidates(k,:);a=zeros(size(app.Model.Elements,1),1);a(c(1))=c(2);
+                        sol=sdt_solveFrame(app.Model,a);yp=sol.Displacements(dofs);
+                        for j=1:numel(dofs)
+                            row=row+1;res=(app.Measurements(j)-yp(j))/app.MeasurementSigma(j);
+                            pred(row,:)=[c(1),c(2),dofs(j),app.Measurements(j),yp(j),app.MeasurementSigma(j),res,res^2];
+                        end
+                    end
+                    writetable(array2table(pred,'VariableNames',{'Element','Loss','DOF','Measured','Predicted','Sigma','WeightedResidual','ObjectiveContribution'}), ...
+                        fullfile(folder,'Candidate_readings.csv'));
+                end
+                if ~isempty(app.RecommendationComparison)
+                    writetable(app.RecommendationComparison.Layout,fullfile(folder,'Sensor_layouts.csv'));
+                    writetable(app.RecommendationComparison.Metrics,fullfile(folder,'Sensor_comparison_metrics.csv'));
+                end
+                if ~isempty(app.DynamicResult)
+                    d=app.DynamicResult;names=[{'Time_s'},cellstr(compose('Floor%d_mm',1:app.Model.nStories))];
+                    writetable(array2table([d.Time(:),1000*d.FloorDisplacement_m.'],'VariableNames',names),fullfile(folder,'Dynamic_floor_displacements.csv'));
+                end
+                if ~isempty(app.StabilityResult)
+                    writetable(app.StabilityResult.NodeResponse,fullfile(folder,'Stability_nodes.csv'));
+                    writetable(app.StabilityResult.NewtonHistory,fullfile(folder,'Newton_history.csv'));
+                end
+                fid=fopen(fullfile(folder,'README.txt'),'w');assert(fid>=0,'Could not write audit instructions.');
+                closer=onCleanup(@()fclose(fid)); %#ok<NASGU>
+                fprintf(fid,'FrameLab 2D connected release 8. Model revision %d. State: %s\n',app.ModelRevision,app.activeName());
+                fprintf(fid,['SI units except columns explicitly marked mm. Rotation measurements are rad.\n' ...
+                    'Measurements_exact.csv contains ACTUAL MATLAB draws, not inferred values.\n' ...
+                    'J = sum(((Measured-Predicted)./Sigma).^2); RMSE = sqrt(mean((Measured-Predicted).^2)).\n' ...
+                    'Missing module files mean that module has not been run for the current inputs.\n' ...
+                    'The MAT snapshot contains current models, matrices, settings and all available results.\n' ...
+                    'Comparison uses the same additional-loss scenarios and fixed absolute X-noise in both RC models.\n']);
+                uialert(app.UIFigure,['Saved exact data to ' folder],'Verification export');
+            catch ME,app.showError(ME);end
+        end
+
+        function checkMesh(app)
+            try
+                app.requireActive();
+                n=round(app.MeshField.Value);assert(2*n*size(app.Model.Elements,1)<=400,'Refinement would exceed 400 segments.');
+                a=sdt_stabilityPoint(app.Model,app.GravityField.Value*1000,app.GravityFactorField.Value,app.StiffnessField.Value,n);
+                b=sdt_stabilityPoint(app.Model,app.GravityField.Value*1000,app.GravityFactorField.Value,app.StiffnessField.Value,2*n);
+                delta=100*abs(b.RoofSecond-a.RoofSecond)/max(abs(b.RoofSecond),1e-12);
+                uialert(app.UIFigure,sprintf(['Same applied loads: %d segments %.6g mm; %d segments %.6g mm.\n' ...
+                    'Relative difference %.3f%%. This is one refinement check, not proof of full convergence.'], ...
+                    n,1000*a.RoofSecond,2*n,1000*b.RoofSecond,delta),'Mesh comparison');
+            catch ME,app.showError(ME);end
+        end
+
         function createEnvironmentTab(app)
             app.EnvTab=uitab(app.TabGroup,'Title','7. Exposure scenarios');
             g=uigridlayout(app.EnvTab,[5 1]);
@@ -166,10 +437,10 @@ classdef FrameLab2D < matlab.apps.AppBase
             % of clipping controls or collapsing the result table.
             g.Scrollable='on'; g.Padding=[8 8 8 8]; g.RowSpacing=8;
             g.ColumnWidth={'1x'};
-            g.RowHeight={54,166,320,50,76};
+            g.RowHeight={54,166,320,90,76};
             note=uilabel(g,'WordWrap','on','Text', ...
                 ['RC rectangular sections, symmetric top/bottom bars, uncracked perfect bond. ' ...
-                 'Tab 1 E is concrete Ec here. Use RC 400 mm PRESET first for the demo. Loss percentages are user assumptions.']);
+                 'Same RC baseline as Tab 1. Apply losses, then re-optimize sensors. Exposure labels do not predict losses.']);
             note.Layout.Row=1;
             c=uigridlayout(g,[4 6]); c.Layout.Row=2;
             c.Tag='ExposureInputGrid'; c.Scrollable='on';
@@ -180,7 +451,7 @@ classdef FrameLab2D < matlab.apps.AppBase
             c.ColumnWidth={145,160,145,130,160,190};
             label=uilabel(c,'Text','Member group'); label.Layout.Row=1; label.Layout.Column=1;
             app.EnvGroup=uidropdown(c,'Items',{'All members','Bottom columns','Exterior columns', ...
-                'Columns at story','Beams at story','Selected table rows'});
+                'Columns at story','Beams at story','Selected table rows','Left columns'});
             app.EnvGroup.Layout.Row=1; app.EnvGroup.Layout.Column=2;
             label=uilabel(c,'Text','Story'); label.Layout.Row=1; label.Layout.Column=3;
             app.EnvStory=uieditfield(c,'numeric','Value',1,'Limits',[1 Inf],'RoundFractionalValues','on');
@@ -228,31 +499,32 @@ classdef FrameLab2D < matlab.apps.AppBase
             app.EnvMembers.CellEditCallback=@(~,~)app.environmentEdited();
             t=uitab(tg,'Title','Section calculations');
             app.EnvSections=uitable(t,'Tag','ExposureSections','Units','normalized','Position',[0 0 1 1],'RowName',[]);
-            t=uitab(tg,'Title','Response and hand check');
+            t=uitab(tg,'Title','Response and calculations');
             ag=uigridlayout(t,[2 1]); ag.RowHeight={125,'1x'};
             app.EnvComparison=uitable(ag,'Tag','ExposureComparison','RowName',[]); app.EnvComparison.Layout.Row=1;
             app.EnvAudit=uitextarea(ag,'Tag','ExposureAudit','Editable','off','FontName','Courier New','FontSize',11);
-            app.EnvAudit.Layout.Row=2; app.EnvAudit.Value={'Apply a scenario, select a member row, then click HAND CHECK.'};
-            b=uigridlayout(g,[1 5]); b.Layout.Row=4; b.Padding=[0 0 0 0];
-            b.ColumnWidth={'1x','1x','1x','1x','1x'};
+            app.EnvAudit.Layout.Row=2; app.EnvAudit.Value={'Apply a scenario, select a member row, then click CALCULATION DETAILS.'};
+            b=uigridlayout(g,[2 3]); b.Layout.Row=4; b.Padding=[0 0 0 0];
+            b.ColumnWidth={'1x','1x','1x'}; b.RowHeight={36,36};
             uibutton(b,'Text','APPLY AND COMPARE','ButtonPushedFcn',@(~,~)app.applyEnvironment());
             uibutton(b,'Text','COMPARE P-DELTA','ButtonPushedFcn',@(~,~)app.compareEnvironmentStability());
-            uibutton(b,'Text','HAND CHECK','ButtonPushedFcn',@(~,~)app.auditEnvironment());
-            uibutton(b,'Text','EXPORT AUDIT','ButtonPushedFcn',@(~,~)app.exportEnvironment());
-            uibutton(b,'Text','RESTORE ORIGINAL','ButtonPushedFcn',@(~,~)app.restoreEnvironment());
+            uibutton(b,'Text','CALCULATION DETAILS','ButtonPushedFcn',@(~,~)app.auditEnvironment());
+            uibutton(b,'Text','EXPORT CALCULATIONS','ButtonPushedFcn',@(~,~)app.exportEnvironment());
+            uibutton(b,'Text','RESTORE HEALTHY RC','ButtonPushedFcn',@(~,~)app.restoreEnvironment());
+            uibutton(b,'Text','RE-OPTIMIZE SENSORS','ButtonPushedFcn',@(~,~)app.compareSensorsAfterExposure());
             app.EnvStatus=uitextarea(g,'Tag','ExposureStatus','Editable','off'); app.EnvStatus.Layout.Row=5;
             app.EnvStatus.Value={'Generate the frame in Tab 1. Then assign assumptions to member groups.'};
         end
 
         function environmentRCPreset(app)
             % Explicit opt-in: preserve geometry/load inputs, reset exposure cases.
+            app.BaselineMode.Value='Healthy RC composite';
             app.EField.Value=30;
             app.AField.Value=.4*.4;
             app.IField.Value=.4^4/12;
             app.EnvEs.Value=200; app.EnvBars.Value=2;
             app.EnvDiameter.Value=16; app.EnvCover.Value=50;
             app.generateModel();
-            app.invalidateEnvironmentResults();
             app.TabGroup.SelectedTab=app.EnvTab;
             app.EnvStatus.Value={'RC preset: 400 x 400 mm, Ec=30 GPa, Es=200 GPa, 2 bars/face, d=16 mm, bar-centre cover=50 mm.'; ...
                 'Member exposure rows reset. Now assign an exposure and losses, then APPLY AND COMPARE.'};
@@ -287,8 +559,12 @@ classdef FrameLab2D < matlab.apps.AppBase
 
         function environmentEdited(app)
             app.EnvDirty=true;
-            app.EnvStatus.Value={'Inputs changed. Click APPLY AND COMPARE to update results.'; ...
-                'Existing results in other tabs still describe the last APPLIED model.'};
+            app.invalidateEnvironmentResults();
+            cla(app.ModelAxes,'reset'); cla(app.SensorAxes,'reset'); app.updateStateBanner();
+            app.ModelStatus.Text='Exposure inputs edited. Results cleared; APPLY AND COMPARE is required.';
+            app.EnvComparison.Data=table(); app.EnvSections.Data=table(); app.EnvResponse=table();
+            app.EnvAudit.Value={'Inputs changed. Apply before reading section or response calculations.'};
+            app.EnvStatus.Value={'Exposure edits pending. APPLY AND COMPARE before running other modules.'};
         end
 
         function assignEnvironment(app)
@@ -301,6 +577,10 @@ classdef FrameLab2D < matlab.apps.AppBase
                     case 'Bottom columns', mask=strcmp(data(:,2),'Column') & cell2mat(data(:,3))==1;
                     case 'Columns at story', mask=strcmp(data(:,2),'Column') & cell2mat(data(:,3))==story;
                     case 'Beams at story', mask=strcmp(data(:,2),'Beam') & cell2mat(data(:,3))==story;
+                    case 'Left columns'
+                        el=app.EnvOriginal.Elements;xy=app.EnvOriginal.Nodes;
+                        x=xy(el(:,2),2);tol=1e-9*max(1,max(abs(xy(:,2))));
+                        mask=el(:,7)==1 & abs(x-min(xy(:,2)))<tol;
                     case 'Exterior columns'
                         el=app.EnvOriginal.Elements; xy=app.EnvOriginal.Nodes;
                         x=xy(el(:,2),2); tol=1e-9*max(1,max(abs(xy(:,2))));
@@ -335,6 +615,7 @@ classdef FrameLab2D < matlab.apps.AppBase
                 % Commit only after validation and both solves have succeeded.
                 app.EnvHealthy=healthy; app.EnvReport=report; app.EnvResponse=comparison; app.EnvStabilitySettings=[];
                 app.Model=scenario; app.AnalysisResult=rs;
+                app.BaselineMode.Value='Healthy RC composite';
                 app.EnvApplied=true; app.EnvDirty=false;
                 app.EnvSections.Data=report; app.EnvSections.ColumnName=report.Properties.VariableNames;
                 app.EnvComparison.Data=comparison; app.EnvComparison.ColumnName=comparison.Properties.VariableNames;
@@ -342,7 +623,7 @@ classdef FrameLab2D < matlab.apps.AppBase
                 severity=1-report.EI_ratio;
                 app.plotStructure(app.ModelAxes,rs,[],[],severity,true);
                 app.plotStructure(app.SensorAxes,rs,sdt_sensorDOFs(app.ExistingSensors(:,1:2)),[],severity);
-                app.ModelStatus.Text='Exposure scenario active | static, dynamics and stability use updated EA and EI.';
+                app.analyzeHealthy(); app.updateStateBanner();
                 app.EnvStatus.Value={'Applied. Comparisons use HEALTHY RC COMPOSITE versus deteriorated RC, not the original gross-concrete model.'; ...
                     'Uncracked perfect bond; symmetric uniform bar loss; removed steel remains void. Diagnosis now tests ADDITIONAL stiffness loss relative to this scenario.'};
                 app.auditEnvironment();
@@ -350,8 +631,8 @@ classdef FrameLab2D < matlab.apps.AppBase
         end
 
         function invalidateEnvironmentResults(app)
-            app.StopRequested=true;
-            app.clearInferenceState(); app.StabilityResult=[];
+            app.StopRequested=true; app.ModelRevision=app.ModelRevision+1;
+            app.clearDynamic(); app.clearInferenceState(); app.StabilityResult=[];
             for ax={app.DiagnosisAxes,app.DiagnosisScanAxes,app.RecommendationAxes, ...
                     app.DynamicAxes,app.TimeHistoryAxes,app.StabilityAxes,app.StabilityCurveAxes}
                 cla(ax{1});
@@ -359,7 +640,7 @@ classdef FrameLab2D < matlab.apps.AppBase
             app.StabilityTable.Data=table();
             app.DiagnosisStatus.Text='Model changed. Simulate new measurements before diagnosis.';
             app.RecommendationStatus.Text='Model changed. Run a new diagnosis before recommendations.';
-            app.ObservabilityStatus.Text='Model changed. Run CHECK SENSOR ADEQUACY again.';
+            app.ObservabilityStatus.Text='Model changed. Run SENSOR LIMITATIONS again.';
             app.DynamicStatus.Text='Model changed. Run a new dynamic simulation.';
             app.StabilityStatus.Value={'Model changed. Run P-Delta again.'};
         end
@@ -393,7 +674,7 @@ classdef FrameLab2D < matlab.apps.AppBase
                 extra=[extra;table({'Elastic critical gravity factor'},{'-'},hc,sc, ...
                     sdt_environmentPercent(hc,sc),'VariableNames',extra.Properties.VariableNames)];
                 app.EnvResponse=[app.EnvResponse(1:3,:);extra];
-                app.EnvComparison.Data=app.EnvResponse; app.EnvStabilitySettings=args;
+                app.EnvComparison.Data=app.EnvResponse; app.EnvComparison.ColumnName=app.EnvResponse.Properties.VariableNames; app.EnvStabilitySettings=args;
                 app.StabilityResult=s; app.updateStabilityViews();
                 app.EnvStatus.Value={sprintf('Stability compared at %.4g kN/floor, lambda %.4g, EI factor %.3g, %d segments/member.', ...
                     args{1}/1000,args{2},args{3},args{4}); ...
@@ -411,12 +692,19 @@ classdef FrameLab2D < matlab.apps.AppBase
 
         function restoreEnvironment(app)
             try
-                app.Model=app.EnvOriginal; app.AnalysisResult=sdt_solveFrame(app.Model,[]);
-                app.resetEnvironment(); app.invalidateEnvironmentResults();
-                z=zeros(size(app.Model.Elements,1),1);
-                app.plotStructure(app.ModelAxes,app.AnalysisResult,[],[],z,true);
-                app.plotStructure(app.SensorAxes,app.AnalysisResult,sdt_sensorDOFs(app.ExistingSensors(:,1:2)),[],z);
-                app.ModelStatus.Text='Original gross-section properties restored.';
+                if isempty(app.EnvHealthy)
+                    error('Select the RC demo before using exposure comparisons.');
+                end
+                data=sdt_referenceRows(app.EnvOriginal);
+                [h,~,report]=sdt_environmentBuild(app.EnvOriginal,data,app.sectionOptions());
+                result=sdt_solveFrame(h,[]);
+                app.EnvMembers.Data=data; app.EnvHealthy=h; app.Model=h; app.AnalysisResult=result;
+                app.EnvReport=report; app.EnvApplied=false; app.EnvDirty=false;
+                app.EnvResponse=table(); app.EnvComparison.Data=table(); app.EnvStabilitySettings=[];
+                app.EnvSections.Data=report; app.EnvSections.ColumnName=report.Properties.VariableNames;
+                app.invalidateEnvironmentResults(); app.analyzeHealthy(); app.updateStateBanner();
+                app.plotStructure(app.SensorAxes,result,sdt_sensorDOFs(app.ExistingSensors(:,1:2)),[],[]);
+                app.EnvStatus.Value={'Healthy RC composite restored. Exposure rows reset to zero loss.'};
             catch ME, app.showError(ME); end
         end
 
@@ -460,7 +748,7 @@ classdef FrameLab2D < matlab.apps.AppBase
             app.GravityField=uieditfield(controls,'numeric','Value',1000,'Limits',[0 Inf]);
             app.GravityField.Layout.Row=1; app.GravityField.Layout.Column=2;
             label=uilabel(controls,'Text','Gravity factor lambda'); label.Layout.Row=1; label.Layout.Column=3;
-            app.GravityFactorField=uieditfield(controls,'numeric','Value',1,'Limits',[0 Inf]);
+            app.GravityFactorField=uieditfield(controls,'numeric','Value',5,'Limits',[0 Inf]);
             app.GravityFactorField.Layout.Row=1; app.GravityFactorField.Layout.Column=4;
             label=uilabel(controls,'Text','Effective EI / gross EI'); label.Layout.Row=1; label.Layout.Column=5;
             app.StiffnessField=uieditfield(controls,'numeric','Value',1,'Limits',[0.01 1]);
@@ -484,12 +772,12 @@ classdef FrameLab2D < matlab.apps.AppBase
                 'FontColor',[1 1 1],'ButtonPushedFcn',@(~,~)app.runStability());
             uibutton(buttons,'Text','RC FRAME PRESET','ButtonPushedFcn',@(~,~)app.rcStabilityPreset());
             uibutton(buttons,'Text','SHOW 80% CRITICAL','ButtonPushedFcn',@(~,~)app.showNearCritical());
-            uibutton(buttons,'Text','VERIFY BENCHMARKS','ButtonPushedFcn',@(~,~)app.verifyStability());
+            uibutton(buttons,'Text','MESH REFINEMENT CHECK','ButtonPushedFcn',@(~,~)app.checkMesh());
             uibutton(buttons,'Text','EXPORT RESULTS','ButtonPushedFcn',@(~,~)app.exportStability());
             app.StabilityAxes=uiaxes(g); app.StabilityAxes.Layout.Row=2; app.StabilityAxes.Layout.Column=1;
             app.StabilityCurveAxes=uiaxes(g); app.StabilityCurveAxes.Layout.Row=2; app.StabilityCurveAxes.Layout.Column=2;
             app.StabilityTable=uitable(g); app.StabilityTable.Layout.Row=3; app.StabilityTable.Layout.Column=[1 2];
-            app.StabilityTable.ColumnName='auto'; app.StabilityTable.RowName=[];
+            app.StabilityTable.ColumnName={}; app.StabilityTable.RowName=[];
             app.StabilityStatus=uitextarea(g,'Editable','off','FontSize',11);
             app.StabilityStatus.Layout.Row=4; app.StabilityStatus.Layout.Column=[1 2];
             app.StabilityStatus.Value={'Click RUN P-DELTA. Gravity loads are lumped at each floor joint.'; ...
@@ -497,16 +785,18 @@ classdef FrameLab2D < matlab.apps.AppBase
         end
 
         function rcStabilityPreset(app)
-            app.StoriesField.Value=3; app.BaysField.Value=2;
+            app.BaselineMode.Value='Healthy RC composite';
+            app.StoriesField.Value=2; app.BaysField.Value=2;
             app.BayWidthField.Value=6; app.StoryHeightField.Value=3.5;
             app.EField.Value=30; app.AField.Value=.4*.4; app.IField.Value=.4^4/12;
-            app.LoadField.Value=50; app.GravityField.Value=800;
-            app.StiffnessField.Value=.5; app.GravityFactorField.Value=1;
+            app.LoadField.Value=100; app.GravityField.Value=1000;
+            app.StiffnessField.Value=1; app.GravityFactorField.Value=5;
             app.MeshField.Value=4; app.generateModel(); app.runStability();
         end
 
         function runStability(app)
             try
+                app.requireActive();
                 app.StabilityStatus.Value={'Solving corotational Newton-Raphson equilibrium and reference eigenbuckling...'}; drawnow;
                 app.StabilityResult=sdt_stabilitySolve(app.Model,app.GravityField.Value*1000, ...
                     app.GravityFactorField.Value,app.StiffnessField.Value,round(app.MeshField.Value));
@@ -521,6 +811,11 @@ classdef FrameLab2D < matlab.apps.AppBase
                     r.GravityPerFloor/1000,r.LoadFactor,sum(app.Model.Loads(1:3:end))/1000,r.EIFactor); ...
                     sprintf('Full Newton-Raphson: %d history rows, tolerance %.1e. Reference buckling is not nonlinear collapse capacity.', ...
                     height(r.NewtonHistory),r.NewtonTolerance)};
+                stress=0;
+                for e=1:size(r.Mesh.Elements,1)
+                    stress=max(stress,abs(r.SegmentActions(e,4))/r.Mesh.Elements(e,5));
+                end
+                app.StabilityStatus.Value{end+1}=sprintf('Model v%d | %s | max nominal |N|/Aeq %.3g MPa; no material yield/crack check.',app.ModelRevision,app.activeName(),stress/1e6);
                 app.updateStabilityViews();
             catch ME
                 app.StabilityResult=[];
@@ -530,6 +825,7 @@ classdef FrameLab2D < matlab.apps.AppBase
 
         function showNearCritical(app)
             try
+                app.requireActive();
                 r=sdt_stabilitySolve(app.Model,app.GravityField.Value*1000,0, ...
                     app.StiffnessField.Value,round(app.MeshField.Value));
                 if isempty(r.Factors), error('There is no positive critical factor. Apply a gravity load.'); end
@@ -623,6 +919,7 @@ hold(ax,'off');
                 case 'Tangent K (free)', data=array2table(full(r.TangentK(r.Free,r.Free)));
             end
             app.StabilityTable.Data=data;
+            app.StabilityTable.ColumnName=data.Properties.VariableNames;
         end
 
         function verifyStability(app)
@@ -654,7 +951,7 @@ hold(ax,'off');
                 'RUN DIAGNOSIS',@runDiagnosis; ...
                 'RUN ANIMATION',@runDynamicSimulation; ...
                 'STOP',@stopDynamicSimulation; ...
-                'CHECK SENSOR ADEQUACY',@runObservability; ...
+                'SENSOR LIMITATIONS',@runObservability; ...
                 'OPTIMIZE SENSOR LOCATIONS',@runRecommendation};
             for k=1:size(bindings,1)
                 button=findall(app.UIFigure,'Type','uibutton','Text',bindings{k,1});
@@ -681,48 +978,61 @@ hold(ax,'off');
         end
 
         function generateModel(app,varargin)
+            app.ModelInputDirty=true; app.StopRequested=true;
+            app.clearDynamic(); app.clearInferenceState(); app.clearStability();
+            app.StateLabel.Text='MODEL INPUT EDITS PENDING';
             try
-                app.Model = sdt_generatePortalFrame(app.StoriesField.Value,app.BaysField.Value, ...
+                raw=sdt_generatePortalFrame(app.StoriesField.Value,app.BaysField.Value, ...
                     app.BayWidthField.Value,app.StoryHeightField.Value, ...
                     app.EField.Value*1e9,app.AField.Value,app.IField.Value);
-                nCols = app.Model.nBays+1;
-                topNodes = app.Model.nStories*nCols + (1:nCols);
-                app.Model.Loads(:) = 0;
-                app.Model.Loads(3*topNodes-2) = app.LoadField.Value*1e3/numel(topNodes);
-                app.resetEnvironment();
-                app.AnalysisResult = sdt_solveFrame(app.Model,[]);
-                app.StabilityResult = [];
-                node1 = nCols + nCols;
-                node2 = app.Model.nStories*nCols+nCols;
-                app.ExistingSensors = unique([node1,1,app.SimulationNoiseField.Value; ...
-                    node2,1,app.SimulationNoiseField.Value],'rows','stable');
-                app.HiddenElementField.Limits = [1,size(app.Model.Elements,1)];
-                app.HiddenElementField.Value = 1;
-                app.SensorNodeField.Limits = [1,size(app.Model.Nodes,1)];
-                app.SensorNodeField.Value = node2;
-                app.clearInferenceState();
-                app.refreshSensorTable();
-                app.plotStructure(app.ModelAxes,app.AnalysisResult,[],[],zeros(size(app.Model.Elements,1),1));
-                app.plotStructure(app.SensorAxes,app.AnalysisResult,sdt_sensorDOFs(app.ExistingSensors(:,1:2)),[],zeros(size(app.Model.Elements,1),1));
-                app.ModelStatus.Text = sprintf('INPUT ACCEPTED: %s | %d nodes | %d elements | cond(Kff)=%.2e', ...
-                    app.Model.Name,size(app.Model.Nodes,1),size(app.Model.Elements,1),app.AnalysisResult.ConditionNumber);
+                nc=raw.nBays+1; top=raw.nStories*nc+(1:nc);
+                raw.Loads(:)=0; raw.Loads(3*top-2)=app.LoadField.Value*1000/nc;
+                data=sdt_referenceRows(raw); healthy=[]; report=table(); active=raw;
+                if strcmp(app.BaselineMode.Value,'Healthy RC composite')
+                    [healthy,~,report]=sdt_environmentBuild(raw,data,app.sectionOptions());
+                    active=healthy;
+                end
+                result=sdt_solveFrame(active,[]); % Validate before replacing active state.
+                app.Model=raw; app.resetEnvironment();
+                app.Model=active; app.EnvHealthy=healthy; app.EnvReport=report;
+                app.EnvDirty=false; app.EnvApplied=false; app.ModelInputDirty=false; app.AnalysisResult=result;
+                app.HiddenElementField.Limits=[1 size(raw.Elements,1)]; app.HiddenElementField.Value=1;
+                n1=2*nc; n2=raw.nStories*nc+nc;
+                app.ExistingSensors=unique([n1 1 app.SensorNoiseField.Value;n2 1 app.SensorNoiseField.Value],'rows','stable');
+                app.SensorNodeField.Limits=[1 size(raw.Nodes,1)]; app.SensorNodeField.Value=n2;
+                app.invalidateEnvironmentResults(); app.refreshSensorTable();
+                app.EnvSections.Data=report; app.EnvSections.ColumnName=report.Properties.VariableNames;
+                app.plotStructure(app.ModelAxes,result,[],[],[],true);
+                app.plotStructure(app.SensorAxes,result,sdt_sensorDOFs(app.ExistingSensors(:,1:2)),[],[]);
+                app.analyzeHealthy(); app.updateStateBanner();
+                app.EnvStatus.Value={'Healthy reference ready. Assign losses and click APPLY AND COMPARE.'; ...
+                    'RC mode uses the same uncracked composite baseline in all seven modules. No loss is inferred from a label.'};
             catch ME
+                if ~isempty(app.StateLabel), app.StateLabel.Text=['Input not applied: ' ME.message]; end
                 app.showError(ME);
             end
         end
 
         function analyzeHealthy(app,varargin)
             try
-                app.AnalysisResult = sdt_solveFrame(app.Model,[]);
-                app.plotStructure(app.ModelAxes,app.AnalysisResult,[],[],zeros(size(app.Model.Elements,1),1),true);
-                maxDisp = max(hypot(app.AnalysisResult.Displacements(1:3:end), ...
-                    app.AnalysisResult.Displacements(2:3:end)));
-                if app.EnvApplied, label='Exposure scenario analysis complete'; else, label='Healthy analysis complete'; end
-                app.ModelStatus.Text = sprintf([label ' | max |u| = %.4g m | equilibrium residual = %.3e N'], ...
-                    maxDisp,norm(app.AnalysisResult.Reactions(app.AnalysisResult.FreeDOFs)));
-            catch ME
-                app.showError(ME);
-            end
+                app.requireActive();
+                app.AnalysisResult=sdt_solveFrame(app.Model,[]);
+                severity=zeros(size(app.Model.Elements,1),1);
+                if app.EnvApplied && ~isempty(app.EnvReport), severity=1-app.EnvReport.EI_ratio; end
+                app.plotStructure(app.ModelAxes,app.AnalysisResult,[],[],severity,true);
+                nc=app.Model.nBays+1; roof=app.Model.nStories*nc+(1:nc);
+                u=app.AnalysisResult.Displacements; roofmm=mean(u(3*roof-2))*1000;
+                drift=0;
+                for f=1:app.Model.nStories
+                    up=f*nc+(1:nc);lo=(f-1)*nc+(1:nc);
+                    drift=max(drift,100*max(abs(u(3*up-2)-u(3*lo-2)))/app.Model.StoryHeight);
+                end
+                app.ModelStatus.Text=sprintf(['%s | model v%d\nRoof mean X: %.4f mm\nMax column drift: %.4f%%\n' ...
+                    'Free-DOF equilibrium residual: %.2e N\n\nAll response modules use this active stiffness model.\n' ...
+                    'Diagnosis estimates ADDITIONAL loss. Dynamics uses applied harmonic force.'], ...
+                    app.activeName(),app.ModelRevision,roofmm,drift,norm(app.AnalysisResult.Reactions(app.AnalysisResult.FreeDOFs)));
+                app.updateStateBanner();
+            catch ME, app.showError(ME); end
         end
 
         function addSensor(app,varargin)
@@ -787,11 +1097,13 @@ hold(ax,'off');
 
         function damageSliderMoved(app,varargin)
             app.DamageValueLabel.Text = sprintf('%.0f%% stiffness loss',app.DamageSlider.Value);
+            app.clearInferenceState();
         end
 
         function simulateMeasurements(app,varargin)
             try
-                app.requireSensors();
+                app.requireActive(); app.requireSensors();
+                app.clearInferenceState();
                 nElements = size(app.Model.Elements,1);
                 alpha = zeros(nElements,1);
                 hidden = round(app.HiddenElementField.Value);
@@ -807,15 +1119,27 @@ hold(ax,'off');
                 percent = hypot(app.ExistingSensors(:,3),noisePercent);
                 sigma = max(percent/100.*reference,1e-9);
                 stream = RandStream('mt19937ar','Seed',7405);
-                app.Measurements = yTrue + sigma.*randn(stream,size(yTrue));
+                draws=randn(stream,size(yTrue)); draws(percent==0)=0;
+                noiseStd=sigma.*double(percent>0);
+                app.Measurements = yTrue + noiseStd.*draws;
                 app.MeasurementSigma = sigma;
+                node=ceil(dofs/3); direction=mod(dofs-1,3)+1;
+                units=repmat({'m'},numel(dofs),1); units(direction==3)=repmat({'rad'},nnz(direction==3),1);
+                actualZ=(app.Measurements-yTrue)./sigma;
+                app.MeasurementAudit=table(node,direction,dofs,units,healthy,yTrue, ...
+                    app.Measurements,sigma,noiseStd,actualZ,percent,reference, ...
+                    'VariableNames',{'Node','Direction','DOF','Unit','HealthyReading','TrueReading', ...
+                    'MeasuredReading','Sigma','ActualNoiseStd','NoiseZ','EffectiveNoisePercent','ReferenceScale'});
+                app.MeasurementSettings=struct('ModelRevision',app.ModelRevision,'ActiveState',app.activeName(), ...
+                    'Seed',7405,'Generator','mt19937ar','HiddenElement',hidden,'TrueLoss',alpha(hidden), ...
+                    'SimulationNoisePercent',noisePercent,'SensorNoisePercent',app.ExistingSensors(:,3));
                 app.Diagnosis = [];
                 app.Recommendation = [];
                 app.DiagnosisTable.Data = table();
                 app.RecommendationTable.Data = table();
                 cla(app.DiagnosisScanAxes,'reset');
                 app.plotStructure(app.DiagnosisAxes,truth,dofs,[],alpha,true);
-                app.DiagnosisStatus.Text = sprintf('Synthetic data ready | true element %d | true loss %.0f%% | noise uses each channel response scale', ...
+                app.DiagnosisStatus.Text = sprintf('Synthetic data ready | element %d | true loss %.0f%% | export includes actual readings, sigma and noise draws', ...
                     hidden,100*alpha(hidden));
             catch ME
                 app.showError(ME);
@@ -824,15 +1148,16 @@ hold(ax,'off');
 
         function runDiagnosis(app,varargin)
             try
+                app.requireActive();
                 if isempty(app.Measurements)
                     app.simulateMeasurements();
                 end
                 if isempty(app.Measurements), return; end
                 dofs = sdt_sensorDOFs(app.ExistingSensors(:,1:2));
                 app.DiagnosisStatus.Text = 'Running single-damage inverse search...'; drawnow;
-                app.Diagnosis = sdt_estimateSingleDamage(app.Model,dofs,app.Measurements,app.MeasurementSigma,linspace(0.01,0.80,80));
+                app.Diagnosis = sdt_estimateSingleDamage(app.Model,dofs,app.Measurements,app.MeasurementSigma,0:0.01:0.80);
                 top = app.Diagnosis.Candidates(1:min(8,end),:);
-                app.DiagnosisTable.Data = array2table(top,'VariableNames',{'Element','Alpha','Objective','RMSE_m'});
+                app.DiagnosisTable.Data = array2table(top,'VariableNames',{'Element','Alpha','Objective','RMSE_raw'});
                 severityByElement = zeros(size(app.Model.Elements,1),1);
                 for i=1:size(app.Diagnosis.Candidates,1)
                     severityByElement(app.Diagnosis.Candidates(i,1)) = app.Diagnosis.Candidates(i,2);
@@ -849,11 +1174,24 @@ hold(ax,'off');
                 bestAlpha(app.Diagnosis.BestElement)=app.Diagnosis.BestAlpha;
                 fitted=sdt_solveFrame(app.Model,bestAlpha);
                 app.plotStructure(app.DiagnosisAxes,fitted,dofs,[],bestAlpha,true);
-                title(app.DiagnosisAxes,{'Best-fit damaged frame | fixed bases', ...
-                    sprintf('Estimated element %d: %.1f%% stiffness loss', ...
-                    app.Diagnosis.BestElement,100*app.Diagnosis.BestAlpha)});
-                app.DiagnosisStatus.Text = sprintf('Best estimate: element %d, %.1f%% loss | weighted objective %.3g | RMSE %.3g m', ...
-                    app.Diagnosis.BestElement,100*app.Diagnosis.BestAlpha,app.Diagnosis.Objective,app.Diagnosis.RMSE);
+                if app.Diagnosis.BestAlpha==0
+                    title(app.DiagnosisAxes,{'Healthy best-fit frame','0% additional member stiffness loss'});
+                else
+                    title(app.DiagnosisAxes,{'Best-fit damaged frame | fixed bases', ...
+                        sprintf('Estimated element %d: %.1f%% additional stiffness loss', ...
+                        app.Diagnosis.BestElement,100*app.Diagnosis.BestAlpha)});
+                end
+                if app.Diagnosis.BestAlpha==0
+                    verdict='Best fit: healthy (0% additional loss)';
+                else
+                    verdict=sprintf('Best fit: E%d, %.1f%% additional loss',app.Diagnosis.BestElement,100*app.Diagnosis.BestAlpha);
+                end
+                gap=NaN;
+                if size(app.Diagnosis.Candidates,1)>1
+                    gap=app.Diagnosis.Candidates(2,3)-app.Diagnosis.Candidates(1,3);
+                end
+                app.DiagnosisStatus.Text=sprintf('%s | J %.4g | RMSE %.4g | next-candidate gap %.4g. Ranking is not confidence.', ...
+                    verdict,app.Diagnosis.Objective,app.Diagnosis.RMSE,gap);
             catch ME
                 app.showError(ME);
             end
@@ -861,7 +1199,7 @@ hold(ax,'off');
 
         function runObservability(app,varargin)
             try
-                app.requireSensors();
+                app.requireActive(); app.requireSensors();
                 dofs = sdt_sensorDOFs(app.ExistingSensors(:,1:2));
                 [H,~] = sdt_computeSensitivity(app.Model,dofs,[],1e-3);
                 columnScale = max(vecnorm(H,2,1),eps);
@@ -888,10 +1226,19 @@ hold(ax,'off');
 
         function runRecommendation(app,varargin)
             try
+                app.requireActive();
+                if strcmp(app.RecommendationMode.Value,'Healthy vs deteriorated RC')
+                    app.compareSensorsAfterExposure(); return;
+                end
                 if isempty(app.Diagnosis)
                     app.runDiagnosis();
                 end
                 if isempty(app.Diagnosis), return; end
+                if app.Diagnosis.BestAlpha==0
+                    app.clearRecommendation();
+                    app.RecommendationStatus.Text='Healthy best fit. Use the controlled RC comparison for prospective sensor design.';
+                    return;
+                end
                 dofs = sdt_sensorDOFs(app.ExistingSensors(:,1:2));
                 sigma = max(mean(app.MeasurementSigma),1e-9);
                 app.Recommendation = sdt_recommendSensors(app.Model,dofs,app.Diagnosis,round(app.NumberSensorsField.Value),sigma);
@@ -902,6 +1249,8 @@ hold(ax,'off');
                 end
                 tableData = [app.Recommendation.Nodes,app.Recommendation.Directions,app.Recommendation.DOFs,app.Recommendation.Scores];
                 app.RecommendationTable.Data = array2table(tableData,'VariableNames',{'Node','Direction','DOF','SeparationScore'});
+                app.RecommendationTable.ColumnName=app.RecommendationTable.Data.Properties.VariableNames;
+                app.RecommendationComparison=[]; app.ComparisonMetrics.Data=table();
                 bestAlpha = zeros(size(app.Model.Elements,1),1);
                 bestAlpha(app.Diagnosis.BestElement)=app.Diagnosis.BestAlpha;
                 bestResult = sdt_solveFrame(app.Model,bestAlpha);
@@ -925,10 +1274,14 @@ hold(ax,'off');
 
         function runDynamicSimulation(app,varargin)
             try
+                app.requireActive();
                 app.StopRequested = false;
                 app.DynamicStatus.Text = 'Assembling mass, damping, and stiffness matrices...';
                 drawnow;
 
+                modelRevision=app.ModelRevision; dynamicRevision=app.DynamicRevision;
+                app.requireActive(); app.StopRequested=false;
+                app.DynamicResult=[];
                 nd = 3*size(app.Model.Nodes,1);
                 fixed = unique(app.Model.FixedDOFs(:));
                 free = setdiff((1:nd).',fixed);
@@ -973,6 +1326,10 @@ hold(ax,'off');
                     V(:,k) = V(:,k-1)+dt*((1-gamma)*Acc(:,k-1)+gamma*Acc(:,k));
                 end
 
+                app.DynamicResult=struct('ModelRevision',modelRevision,'ActiveState',app.activeName(), ...
+                    'Time',time,'FreeDOFs',free,'U',U,'V',V,'Acceleration',Acc,'M',M,'C',C,'K',K, ...
+                    'Frequency1_Hz',omega1/(2*pi),'MassPerFloor_kg',app.FloorMassField.Value*1000, ...
+                    'DampingFirstMode',zeta,'Excitation_Hz',frequency,'TimeStep',dt);
                 fullU = zeros(nd,nt); fullU(free,:) = U;
                 floorResponse=zeros(app.Model.nStories,nt);
                 for level=1:app.Model.nStories
@@ -981,6 +1338,7 @@ hold(ax,'off');
                     floorResponse(level,:)=mean(fullU(floorDOFs,:),1);
                 end
                 roofResponse=floorResponse(end,:);
+                app.DynamicResult.FloorDisplacement_m=floorResponse; app.DynamicResult.PeakRoof_mm=1000*max(abs(roofResponse));
                 floorColors=turbo(app.Model.nStories);
                 colororder(app.TimeHistoryAxes,floorColors);
                 plot(app.TimeHistoryAxes,time,1000*floorResponse.','LineWidth',1.45);
@@ -990,7 +1348,7 @@ hold(ax,'off');
                 legend(app.TimeHistoryAxes,compose('Floor %d',1:app.Model.nStories), ...
                     'Location','best','NumColumns',min(2,app.Model.nStories));
                 timeCursor=xline(app.TimeHistoryAxes,0,'--','Animation time', ...
-                    'Color',[0.12 0.16 0.20],'LineWidth',1.2);
+                    'Color',[0.12 0.16 0.20],'LineWidth',1.2,'HandleVisibility','off');
 
                 span = max(max(app.Model.Nodes(:,2))-min(app.Model.Nodes(:,2)), ...
                     max(app.Model.Nodes(:,3))-min(app.Model.Nodes(:,3)));
@@ -1011,7 +1369,7 @@ hold(ax,'off');
                 hold(app.DynamicAxes,'off');
                 animationFrames = unique(round(linspace(1,nt,min(90,nt))));
                 for k = animationFrames
-                    if app.StopRequested, break; end
+                    if app.StopRequested || modelRevision~=app.ModelRevision || dynamicRevision~=app.DynamicRevision, return; end
                     ux=fullU(1:3:end,k); uz=fullU(2:3:end,k);
                     deformed=[app.Model.Nodes(:,2)+plotScale*ux,app.Model.Nodes(:,3)+plotScale*uz];
                     edgeX=reshape([deformed(edges(:,1),1),deformed(edges(:,2),1),nan(size(edges,1),1)].',[],1);
@@ -1025,7 +1383,7 @@ hold(ax,'off');
                     drawnow limitrate;
                     pause(0.012);
                 end
-                if ~app.StopRequested
+                if ~app.StopRequested && modelRevision==app.ModelRevision && dynamicRevision==app.DynamicRevision
                     app.DynamicStatus.Text = sprintf('Complete | f_1 = %.2f Hz | peak roof response = %.3f mm', ...
                         omega1/(2*pi),1000*max(abs(roofResponse)));
                 end
@@ -1041,15 +1399,18 @@ hold(ax,'off');
         end
 
         function clearInferenceState(app)
-            app.Measurements = zeros(0,1);
-            app.MeasurementSigma = zeros(0,1);
-            app.Diagnosis = [];
-            app.Recommendation = [];
-            if ~isempty(app.DiagnosisTable), app.DiagnosisTable.Data = table(); end
-            if ~isempty(app.RecommendationTable), app.RecommendationTable.Data = table(); end
-            if ~isempty(app.ObservabilityStatus)
-                app.ObservabilityStatus.Text='Model or sensors changed. Run CHECK SENSOR ADEQUACY again.';
+            app.Measurements=zeros(0,1); app.MeasurementSigma=zeros(0,1);
+            app.MeasurementAudit=table(); app.MeasurementSettings=[];
+            app.Diagnosis=[]; app.Recommendation=[]; app.RecommendationComparison=[];
+            if ~isempty(app.DiagnosisTable), app.DiagnosisTable.Data=table(); end
+            if ~isempty(app.RecommendationTable), app.RecommendationTable.Data=table(); end
+            if ~isempty(app.ComparisonMetrics), app.ComparisonMetrics.Data=table(); end
+            for ax={app.DiagnosisAxes,app.DiagnosisScanAxes,app.RecommendationAxes}
+                if ~isempty(ax{1}), cla(ax{1},'reset'); end
             end
+            app.DiagnosisStatus.Text='Inputs changed. Simulate new readings before diagnosis.';
+            app.RecommendationStatus.Text='Choose diagnosis scenarios or the controlled RC before/after comparison.';
+            app.ObservabilityStatus.Text='Sensors or model changed. Check sensor adequacy again.';
         end
 
         function refreshSensorTable(app)
@@ -1145,14 +1506,15 @@ hold(ax,'off');
 
         % Code that executes after component creation
         function startupFcn(app)
-            app.bindRuntimeCallbacks();
-            app.configureAxesInteractions();
             app.createStabilityTab();
             app.createEnvironmentTab();
+            app.createConnectedControls();
+            app.bindRuntimeCallbacks();
+            app.configureAxesInteractions();
             app.generateModel();
-            app.runStability();
-            app.TabGroup.SelectedTab = app.DesignTab4;
+            app.TabGroup.SelectedTab=app.DesignTab4;
         end
+
     end
 
     % Component initialization
@@ -1267,7 +1629,7 @@ hold(ax,'off');
             app.StoriesField.RoundFractionalValues = 'on';
             app.StoriesField.Layout.Row = 1;
             app.StoriesField.Layout.Column = 2;
-            app.StoriesField.Value = 3;
+            app.StoriesField.Value = 2;
 
             % Create DesignLabel27
             app.DesignLabel27 = uilabel(app.DesignGridLayout19);
@@ -1320,7 +1682,7 @@ hold(ax,'off');
             app.EField.Limits = [1 Inf];
             app.EField.Layout.Row = 3;
             app.EField.Layout.Column = 2;
-            app.EField.Value = 200;
+            app.EField.Value = 30;
 
             % Create DesignLabel31
             app.DesignLabel31 = uilabel(app.DesignGridLayout19);
@@ -1333,7 +1695,7 @@ hold(ax,'off');
             app.AField.Limits = [1e-06 Inf];
             app.AField.Layout.Row = 3;
             app.AField.Layout.Column = 4;
-            app.AField.Value = 0.02;
+            app.AField.Value = .16;
 
             % Create DesignLabel32
             app.DesignLabel32 = uilabel(app.DesignGridLayout19);
@@ -1346,7 +1708,7 @@ hold(ax,'off');
             app.IField.Limits = [1e-10 Inf];
             app.IField.Layout.Row = 4;
             app.IField.Layout.Column = 2;
-            app.IField.Value = 8e-05;
+            app.IField.Value = .4^4/12;
 
             % Create DesignLabel33
             app.DesignLabel33 = uilabel(app.DesignGridLayout19);
@@ -1393,7 +1755,7 @@ hold(ax,'off');
             app.DesignButton36.BackgroundColor = [0.4 0.28 0.68];
             app.DesignButton36.FontWeight = 'bold';
             app.DesignButton36.FontColor = [1 1 1];
-            app.DesignButton36.Tooltip = 'Enable mouse drag rotation of the building';
+            app.DesignButton36.Tooltip = 'Restore the 2D front view';
             app.DesignButton36.Layout.Row = 1;
             app.DesignButton36.Layout.Column = 2;
             app.DesignButton36.Text = 'RESET 2D VIEW';
@@ -1410,7 +1772,7 @@ hold(ax,'off');
             % Create ModelStatus
             app.ModelStatus = uilabel(app.DesignGridLayout13);
             app.ModelStatus.VerticalAlignment = 'top';
-            app.ModelStatus.FontWeight = 'bold';
+            app.ModelStatus.FontWeight = 'bold'; app.ModelStatus.WordWrap='on';
             app.ModelStatus.Layout.Row = 3;
             app.ModelStatus.Layout.Column = 1;
             app.ModelStatus.Text = 'INPUT ACCEPTED: 3-story, 2-bay frame | 12 nodes | 15 elements';
@@ -1560,12 +1922,12 @@ hold(ax,'off');
             app.DesignLabel44 = uilabel(app.DesignGridLayout22);
             app.DesignLabel44.Layout.Row = 1;
             app.DesignLabel44.Layout.Column = 3;
-            app.DesignLabel44.Text = 'Damage severity';
+            app.DesignLabel44.Text = 'Additional stiffness loss'; app.DesignLabel44.WordWrap='on';
 
             % Create DamageSlider
             app.DamageSlider = uislider(app.DesignGridLayout22);
-            app.DamageSlider.Limits = [5 70];
-            app.DamageSlider.MajorTicks=5:5:70; app.DamageSlider.MinorTicks=[];
+            app.DamageSlider.Limits = [0 80];
+            app.DamageSlider.MajorTicks=0:10:80; app.DamageSlider.MinorTicks=[];
             app.DamageSlider.FontSize = 8;
             app.DamageSlider.Layout.Row = 1;
             app.DamageSlider.Layout.Column = 4;
@@ -1588,7 +1950,7 @@ hold(ax,'off');
             app.SimulationNoiseField.Limits = [0 25];
             app.SimulationNoiseField.Layout.Row = 2;
             app.SimulationNoiseField.Layout.Column = 2;
-            app.SimulationNoiseField.Value = 1;
+            app.SimulationNoiseField.Value = 0;
 
             % Create DesignButton46
             app.DesignButton46 = uibutton(app.DesignGridLayout22, 'push');
@@ -1658,7 +2020,7 @@ hold(ax,'off');
             app.DesignLabel49.FontWeight = 'bold';
             app.DesignLabel49.Layout.Row = 1;
             app.DesignLabel49.Layout.Column = 2;
-            app.DesignLabel49.Text = 'Damping (%)';
+            app.DesignLabel49.Text = 'First-mode damping (%)'; app.DesignLabel49.WordWrap='on';
 
             % Create DesignLabel50
             app.DesignLabel50 = uilabel(app.DesignGridLayout23);
@@ -1758,7 +2120,7 @@ hold(ax,'off');
             app.DesignButton24.BackgroundColor=[0.1 0.36 0.65];
             app.DesignButton24.FontWeight='bold'; app.DesignButton24.FontColor=[1 1 1];
             app.DesignButton24.Layout.Row=1; app.DesignButton24.Layout.Column=1;
-            app.DesignButton24.Text='CHECK SENSOR ADEQUACY';
+            app.DesignButton24.Text='SENSOR LIMITATIONS';
             app.ObservabilityStatus=uilabel(adequacy);
             app.ObservabilityStatus.Layout.Row=1; app.ObservabilityStatus.Layout.Column=2;
             app.ObservabilityStatus.WordWrap='on';
@@ -1799,7 +2161,7 @@ hold(ax,'off');
             app.NumberSensorsField.RoundFractionalValues = 'on';
             app.NumberSensorsField.Layout.Row = 1;
             app.NumberSensorsField.Layout.Column = 2;
-            app.NumberSensorsField.Value = 1;
+            app.NumberSensorsField.Value = 2;
 
             % Create DesignButton55
             app.DesignButton55 = uibutton(app.DesignGridLayout25, 'push');
@@ -1829,6 +2191,14 @@ hold(ax,'off');
     end
 
     methods (Static)
+        function report = verifyConnectedWorkflow()
+            report=sdt_verifyConnectedWorkflow();
+        end
+
+        function report = verifyStabilityBenchmarks()
+            report=sdt_verifyStability();
+        end
+
         function report = verifyNewtonRaphson()
             report=sdt_verifyNewtonRaphson();
         end
@@ -1895,7 +2265,7 @@ end
 function diagnosis = sdt_estimateSingleDamage(model, sensorDOFs, measurements, sigma, alphaGrid)
 %ESTIMATESINGLEDAMAGE Enumerate one damaged element and its severity.
 if nargin < 5 || isempty(alphaGrid)
-    alphaGrid = linspace(0.02,0.80,80);
+    alphaGrid = 0:0.01:0.80;
 end
 measurements = measurements(:);
 if isscalar(sigma)
@@ -1904,6 +2274,7 @@ end
 sigma = max(sigma(:),eps);
 nElements = size(model.Elements,1);
 candidates = zeros(nElements,4); % element, alpha, objective, RMSE
+scan=zeros(nElements*numel(alphaGrid),4); scanIndex=0;
 
 for e = 1:nElements
     best = [e,0,Inf,Inf];
@@ -1914,6 +2285,7 @@ for e = 1:nElements
         residual = (measurements-pred)./sigma;
         objective = residual.'*residual;
         rmse = sqrt(mean((measurements-pred).^2));
+        scanIndex=scanIndex+1; scan(scanIndex,:)=[e,a,objective,rmse];
         if objective < best(3)
             best = [e,a,objective,rmse];
         end
@@ -1928,6 +2300,7 @@ diagnosis.BestAlpha = candidates(1,2);
 diagnosis.Objective = candidates(1,3);
 diagnosis.RMSE = candidates(1,4);
 diagnosis.Candidates = candidates;
+diagnosis.Scan=array2table(scan,'VariableNames',{'Element','Alpha','Objective','RMSE'});
 end
 
 
@@ -2757,4 +3130,124 @@ for n=supported.'
             'HorizontalAlignment','center','VerticalAlignment','top','FontSize',8,'Clipping','on');
     end
 end
+end
+
+function data=sdt_referenceRows(model)
+ne=size(model.Elements,1);data=cell(ne,6);
+for e=1:ne
+    row=model.Elements(e,:);y=model.Nodes(row(2:3),3);
+    story=max(1,round(max(y)/model.StoryHeight));
+    if row(7)==1,kind='Column';else,kind='Beam';end
+    data(e,:)={row(1),kind,story,'Reference',0,0};
+end
+end
+
+function pred=sdt_designPredictions(model,loss)
+% One unchanged baseline plus one additional member-loss scenario per element.
+ne=size(model.Elements,1);pred=zeros(3*size(model.Nodes,1),ne+1);
+r=sdt_solveFrame(model,[]);pred(:,1)=r.Displacements;
+for e=1:ne
+    alpha=zeros(ne,1);alpha(e)=loss;r=sdt_solveFrame(model,alpha);
+    pred(:,e+1)=r.Displacements;
+end
+end
+
+function score=sdt_layoutScore(pred,dofs,sigma)
+% Same absolute X-displacement standard deviation for every comparison channel.
+if isempty(dofs),score=0;return;end
+score=Inf;
+for p=1:size(pred,2)
+    for q=p+1:size(pred,2)
+        d=(pred(dofs,p)-pred(dofs,q))/sigma;
+        score=min(score,sqrt(sum(d.^2)));
+    end
+end
+end
+
+function layout=sdt_greedyLayout(pred,existing,pool,count,sigma)
+selected=zeros(0,1);scores=zeros(0,1);
+for k=1:min(count,numel(pool))
+    best=-Inf;chosen=NaN;
+    for d=pool(:).'
+        if ismember(d,selected),continue;end
+        score=sdt_layoutScore(pred,[existing(:);selected;d],sigma);
+        if score>best+1e-12,best=score;chosen=d;end
+    end
+    selected(end+1,1)=chosen;scores(end+1,1)=best; %#ok<AGROW>
+end
+layout=struct('DOFs',selected,'Nodes',ceil(selected/3),'Scores',scores, ...
+    'FinalScore',sdt_layoutScore(pred,[existing(:);selected],sigma));
+end
+
+function comparison=sdt_compareSensorLayouts(healthy,deteriorated,existing,count,sigma,loss)
+validateattributes(count,{'double'},{'scalar','integer','positive'});
+validateattributes(sigma,{'double'},{'scalar','finite','positive'});
+validateattributes(loss,{'double'},{'scalar','finite','>',0,'<',1});
+assert(isequal(healthy.Nodes,deteriorated.Nodes) && ...
+    isequal(healthy.Elements(:,1:3),deteriorated.Elements(:,1:3)) && ...
+    isequal(healthy.Loads,deteriorated.Loads) && isequal(healthy.FixedDOFs,deteriorated.FixedDOFs), ...
+    'Controlled comparison requires identical geometry, loading, restraints and member IDs.');
+assert(size(healthy.Elements,1)<=80,'Use at most 80 members for the interactive all-member design comparison.');
+allX=(1:3:3*size(healthy.Nodes,1)).';
+allX=setdiff(allX,healthy.FixedDOFs(:),'stable');
+existing=intersect(allX,existing(:),'stable'); % Explicitly X-only; sigma is in metres.
+pool=setdiff(allX,existing,'stable');
+pH=sdt_designPredictions(healthy,loss);pD=sdt_designPredictions(deteriorated,loss);
+h=sdt_greedyLayout(pH,existing,pool,count,sigma);
+d=sdt_greedyLayout(pD,existing,pool,count,sigma);
+oldOnD=sdt_layoutScore(pD,[existing;h.DOFs],sigma);
+pick=(1:numel(h.DOFs)).';changed=h.DOFs~=d.DOFs;
+layout=table(pick,h.Nodes,d.Nodes,h.DOFs,d.DOFs,changed,h.Scores,d.Scores, ...
+    'VariableNames',{'Pick','HealthyNode','DeterioratedNode','HealthyDOF','DeterioratedDOF', ...
+    'PickChanged','HealthyScore','DeterioratedScore'});
+nc=healthy.nBays+1;roof=3*(healthy.nStories*nc+(1:nc))-2;
+metric={'Existing X channels only (sigma)';'Recommended layout cumulative score (sigma)'; ...
+    'Healthy layout evaluated on each model (sigma)';'Mean roof X (mm)'};
+x=[sdt_layoutScore(pH,existing,sigma);h.FinalScore;h.FinalScore;1000*mean(pH(roof,1))];
+y=[sdt_layoutScore(pD,existing,sigma);d.FinalScore;oldOnD;1000*mean(pD(roof,1))];
+metrics=table(metric,x,y,'VariableNames',{'Metric','HealthyRC','DeterioratedRC'});
+comparison=struct('Layout',layout,'Metrics',metrics,'Healthy',h,'Deteriorated',d, ...
+    'ExistingX',existing,'CandidateX',pool,'Sigma_m',sigma,'AdditionalLoss',loss, ...
+    'ScenarioCount',size(pH,2),'LayoutSetChanged',~isequal(sort(h.DOFs),sort(d.DOFs)), ...
+    'OrderChanged',~isequal(h.DOFs,d.DOFs),'HealthyPredictions',pH,'DeterioratedPredictions',pD, ...
+    'OldLayoutOnDeteriorated',oldOnD,'NewLayoutOnDeteriorated',d.FinalScore, ...
+    'ScenarioDescription','Column 1 healthy; column e+1 has additional loss in member e.');
+end
+
+function report=sdt_verifyConnectedWorkflow()
+% Headless numerical regression checks; execute in MATLAB.
+m=sdt_generatePortalFrame(2,2,6,3.5,30e9,.16,.4^4/12);
+o=struct('Es',200e9,'nFace',2,'d',.016,'a',.05);data=sdt_referenceRows(m);
+[h,zero]=sdt_environmentBuild(m,data,o);rh=sdt_solveFrame(h,[]);rz=sdt_solveFrame(zero,[]);
+assert(norm(rh.Displacements-rz.Displacements)==0,'Zero-loss RC baseline changed.');
+roof=mean(rh.Displacements([19 22 25]))*1000;
+assert(abs(roof-8.646462935648419)<1e-7,'Healthy RC reference displacement changed.');
+existing=[16;25];equal=sdt_compareSensorLayouts(h,zero,existing,2,1e-4,.3);
+assert(isequal(equal.Healthy.DOFs,equal.Deteriorated.DOFs),'Zero-loss layouts differ.');
+assert(abs(equal.NewLayoutOnDeteriorated-equal.OldLayoutOnDeteriorated)<1e-10);
+data(1:3,4)=repmat({'Combined'},3,1);data(1:3,5)=num2cell(10*ones(3,1));data(1:3,6)=num2cell(20*ones(3,1));
+[h,d]=sdt_environmentBuild(m,data,o);[h2,d2]=sdt_environmentBuild(m,data,o);
+assert(isequal(d.Elements,d2.Elements) && isequal(h.Elements,h2.Elements),'Repeated application compounded losses.');
+c=sdt_compareSensorLayouts(h,d,existing,2,1e-4,.3);
+assert(numel(c.Deteriorated.DOFs)==2 && ~any(ismember(c.Deteriorated.DOFs,existing)));
+assert(c.ScenarioCount==11 && isfinite(c.NewLayoutOnDeteriorated));
+base=sdt_solveFrame(d,[]);diag=sdt_estimateSingleDamage(d,existing,base.Displacements(existing),1e-9,0:.01:.8);
+assert(diag.BestAlpha==0 && diag.Objective<1e-10,'Healthy diagnosis is not represented.');
+assert(height(diag.Scan)==810,'Trial audit is incomplete.');
+a=zeros(10,1);a(1)=.3;truth=sdt_solveFrame(d,a);
+fit=sdt_estimateSingleDamage(d,existing,truth.Displacements(existing),1e-9,0:.01:.8);
+assert(fit.BestElement==1 && abs(fit.BestAlpha-.3)<1e-12 && fit.Objective<1e-10);
+report=table({'Healthy RC mean roof (mm)';'Zero-loss layout identity';'Scenario count'; ...
+    'Healthy hypothesis recovered';'Noiseless E1 loss recovered';'Audited grid rows'}, ...
+    [roof;1;c.ScenarioCount;double(diag.BestAlpha==0);fit.BestAlpha;height(diag.Scan)], ...
+    'VariableNames',{'Check','Value'});
+disp(report);
+end
+
+function r=sdt_stabilityPoint(model,gravity,factor,ei,segments)
+% A single corotational equilibrium point, without the full nonlinear load-sway curve.
+r=sdt_linearizedStabilitySolve(model,gravity,factor,ei,segments);
+nr=sdt_newtonSolve(r.Mesh,r.LateralLoad+factor*r.ReferenceGravity,r.Fixed,[]);
+nc=model.nBays+1;roof=3*(model.nStories*nc+(1:nc))-2;
+r.RoofSecond=mean(nr.U(roof));
 end
